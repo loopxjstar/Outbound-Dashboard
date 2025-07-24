@@ -56,6 +56,14 @@ Thumbs.db
 
 # Logs
 *.log
+streamlit.log
+
+# Local development files
+run_streamlit.sh
+start_app.py
+
+# Output files (generated at runtime)
+outputs/
 
 # Node modules (for Claude Code CLI)
 node_modules/
