@@ -9,9 +9,10 @@ logger = logging.getLogger(__name__)
 
 class DataProcessor:
     def __init__(self):
-        self.required_send_columns = ['recipient_name', 'sent_date']
+        self.required_send_columns = ['recipient_name', 'sent_date', 'Recipient Email']
         self.required_open_columns = ['recipient_name', 'sent_date', 'Views', 'Clicks']
         self.required_account_history_columns = ['Edit Date', 'Company URL', 'New Value', 'Account Owner']
+        self.required_contacts_columns = ['Email']
     
     def process_files(self, files):
         """
@@ -21,9 +22,10 @@ class DataProcessor:
             # Load CSV files
             send_df = self._load_csv(files.get('send_mails') or files.get('send'), 'send_mails')
             open_df = self._load_csv(files.get('open_mails') or files.get('open'), 'open_mails')
+            contacts_df = self._load_csv(files.get('contacts'), 'contacts')
             account_history_df = self._load_csv(files.get('account_history'), 'account_history')
             
-            if send_df is None or open_df is None or account_history_df is None:
+            if send_df is None or open_df is None or contacts_df is None or account_history_df is None:
                 return None, None
             
             # Validate required columns
@@ -32,6 +34,9 @@ class DataProcessor:
             
             if not self._validate_columns(open_df, self.required_open_columns, 'open_mails'):
                 return None, None
+            
+            if not self._validate_columns(contacts_df, self.required_contacts_columns, 'contacts'):
+                return None, None
                 
             if not self._validate_columns(account_history_df, self.required_account_history_columns, 'account_history'):
                 return None, None
@@ -39,17 +44,32 @@ class DataProcessor:
             # Clean and prepare data
             send_df = self._clean_data(send_df, 'send')
             open_df = self._clean_data(open_df, 'open')
+            contacts_df = self._clean_data(contacts_df, 'contacts')
             account_history_df = self._clean_data(account_history_df, 'account_history')
             
             # Perform incremental datetime join (send + open)
-            successful_df, failed_df = self._join_send_open(send_df, open_df)
+            send_open_successful, send_open_failed = self._join_send_open(send_df, open_df)
             
-            if successful_df is None:
+            if send_open_successful is None:
                 return None, None
             
+            # Join send-open data with contacts
+            contacts_successful, contacts_failed = self._join_with_contacts(send_open_successful, contacts_df)
+            
+            # Combine all failed records
+            all_failed = []
+            if len(send_open_failed) > 0:
+                all_failed.extend(send_open_failed.to_dict('records'))
+            if len(contacts_failed) > 0:
+                all_failed.extend(contacts_failed.to_dict('records'))
+            
+            final_failed_df = pd.DataFrame(all_failed) if all_failed else pd.DataFrame()
+            
             # Integrate Account History data
-            if len(successful_df) > 0:
-                successful_df = self._integrate_account_history(successful_df, account_history_df)
+            if len(contacts_successful) > 0:
+                contacts_successful = self._integrate_account_history(contacts_successful, account_history_df)
+            
+            successful_df = contacts_successful
             
             # Save output files
             timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
@@ -63,15 +83,15 @@ class DataProcessor:
                 logger.info(f"Saved {len(successful_df)} successful matches to {successful_path}")
             
             # Save failed records
-            if len(failed_df) > 0:
+            if len(final_failed_df) > 0:
                 failed_filename = f"failed_records_{timestamp}.csv"
                 failed_path = os.path.join('outputs', failed_filename)
                 os.makedirs('outputs', exist_ok=True)
-                failed_df.to_csv(failed_path, index=False)
-                logger.info(f"Saved {len(failed_df)} failed records to {failed_path}")
+                final_failed_df.to_csv(failed_path, index=False)
+                logger.info(f"Saved {len(final_failed_df)} failed records to {failed_path}")
             
-            logger.info(f"Successfully processed files: {len(successful_df)} successful, {len(failed_df)} failed")
-            return successful_df, failed_df
+            logger.info(f"Successfully processed files: {len(successful_df)} successful, {len(final_failed_df)} failed")
+            return successful_df, final_failed_df
             
         except Exception as e:
             logger.error(f"Error processing files: {str(e)}")
@@ -120,6 +140,10 @@ class DataProcessor:
         if 'Company URL' in df.columns:
             df['Company URL'] = df['Company URL'].str.lower().str.strip()
         
+        # Clean Email column in contacts
+        if 'Email' in df.columns:
+            df['Email'] = df['Email'].str.strip()
+        
         # Handle numeric columns
         if file_type == 'open':
             if 'Views' in df.columns:
@@ -134,6 +158,8 @@ class DataProcessor:
             df = df.dropna(subset=['recipient_name', 'sent_date'])
         elif file_type == 'account_history':
             df = df.dropna(subset=['Edit Date', 'Company URL'])
+        elif file_type == 'contacts':
+            df = df.dropna(subset=['Email'])
         
         logger.info(f"Cleaned {file_type} data: {len(df)} rows remaining")
         return df
@@ -381,80 +407,162 @@ class DataProcessor:
         
         return phase2_successful, final_failed
     
+    def _join_with_contacts(self, send_open_df, contacts_df):
+        """Join send-open data with contacts on recipient_email = Email (one-to-one)"""
+        logger.info(f"Joining {len(send_open_df)} send-open records with contacts data")
+        
+        # Create lookup dictionary for faster contact matching
+        contacts_lookup = {}
+        for idx, contact_record in contacts_df.iterrows():
+            email = contact_record['Email']
+            if pd.notna(email) and email not in contacts_lookup:
+                # Take first occurrence of each email
+                contacts_lookup[email] = contact_record
+        
+        logger.info(f"Created contacts lookup with {len(contacts_lookup)} unique emails")
+        
+        successful_records = []
+        failed_records = []
+        
+        # Iterate through each send-open record
+        for idx, send_record in send_open_df.iterrows():
+            recipient_email = send_record['Recipient Email']
+            
+            if pd.notna(recipient_email) and recipient_email in contacts_lookup:
+                # Found matching contact - merge all contact fields
+                contact_record = contacts_lookup[recipient_email]
+                
+                # Create merged record: send_record + contact fields
+                merged_record = send_record.to_dict()
+                
+                # Add all contact fields
+                for col in contacts_df.columns:
+                    merged_record[col] = contact_record[col]
+                
+                successful_records.append(merged_record)
+            else:
+                # No matching contact found
+                failed_record = send_record.to_dict()
+                failed_record['failure_reason'] = 'Send email not found in contacts'
+                failed_records.append(failed_record)
+        
+        # Convert to DataFrames
+        successful_df = pd.DataFrame(successful_records) if successful_records else pd.DataFrame()
+        failed_df = pd.DataFrame(failed_records) if failed_records else pd.DataFrame()
+        
+        # Add unique IDs to Company URL values in successful records
+        if len(successful_df) > 0 and 'Company URL' in successful_df.columns:
+            successful_df = self._add_company_url_ids(successful_df)
+        
+        # Verify record count
+        total_output = len(successful_df) + len(failed_df)
+        logger.info(f"Contacts join results: {len(successful_df)} successful, {len(failed_df)} failed")
+        logger.info(f"Input records: {len(send_open_df)}, Output records: {total_output}")
+        logger.info(f"Contacts join success rate: {(len(successful_df) / len(send_open_df) * 100):.1f}%")
+        
+        return successful_df, failed_df
+    
+    def _add_company_url_ids(self, df):
+        """Add unique incremental IDs to Company URL values"""
+        logger.info(f"Adding unique IDs to Company URL values")
+        
+        # Get unique Company URL values
+        unique_company_urls = df['Company URL'].dropna().unique()
+        
+        # Create mapping of Company URL to unique ID (starting from 1)
+        company_url_to_id = {url: idx + 1 for idx, url in enumerate(unique_company_urls)}
+        
+        # Add Company URL ID column
+        df['Company URL ID'] = df['Company URL'].map(company_url_to_id)
+        
+        logger.info(f"Created {len(unique_company_urls)} unique Company URL IDs")
+        for url, url_id in list(company_url_to_id.items())[:5]:  # Show first 5 mappings
+            logger.info(f"  Company URL ID {url_id}: {url}")
+        
+        if len(unique_company_urls) > 5:
+            logger.info(f"  ... and {len(unique_company_urls) - 5} more")
+        
+        return df
+    
     def _integrate_account_history(self, successful_df, account_history_df):
         """Integrate Account History data with successful send-open joins"""
         logger.info(f"Integrating Account History data with {len(successful_df)} successful records")
         
-        # Find domain column (case insensitive)
-        domain_col = None
-        for col in successful_df.columns:
-            if col.lower() == 'domain':
-                domain_col = col
-                break
-        
-        if domain_col is None:
-            logger.error(f"Domain column not found in successful records. Available columns: {list(successful_df.columns)}")
-            # Add placeholder columns for missing domain data
-            successful_df['Latest edit date'] = 'domain column not found'
-            successful_df['Account Owner'] = 'domain column not found'  
-            successful_df['New Value'] = 'domain column not found'
+        # Check if Company URL column exists
+        if 'Company URL' not in successful_df.columns:
+            logger.error(f"Company URL column not found in successful records. Available columns: {list(successful_df.columns)}")
+            # Add placeholder columns for missing Company URL data
+            successful_df['Latest edit date'] = 'Company URL column not found'
+            successful_df['Account Owner'] = 'Company URL column not found'  
+            successful_df['New Value'] = 'Company URL column not found'
             return successful_df
         
-        logger.info(f"Found domain column: '{domain_col}'")
+        logger.info(f"Using Company URL column for Account History matching")
         
-        # Clean domain column for case-insensitive matching
-        successful_df['domain_clean'] = successful_df[domain_col].str.lower().str.strip()
+        # Group by Company URL to find latest account history for each
+        company_url_to_account_info = {}
         
-        # Group by domain to find latest account history for each
-        domain_to_account_info = {}
-        
-        for domain in successful_df['domain_clean'].unique():
+        for company_url in successful_df['Company URL'].unique():
+            # Skip NaN values
+            if pd.isna(company_url):
+                continue
+                
             # Find matching records in account history (exact match, case insensitive)
             matching_accounts = account_history_df[
-                account_history_df['Company URL'] == domain
+                account_history_df['Company URL'] == company_url
             ]
             
             if len(matching_accounts) == 0:
                 # No match found
-                domain_to_account_info[domain] = {
-                    'Latest edit date': 'domain not found',
-                    'Account Owner': 'domain not found', 
-                    'New Value': 'domain not found'
+                company_url_to_account_info[company_url] = {
+                    'Latest edit date': 'Company URL not found',
+                    'Account Owner': 'Company URL not found', 
+                    'New Value': 'Company URL not found'
                 }
             else:
-                # Find the record with latest Edit Date
-                latest_record = matching_accounts.loc[matching_accounts['Edit Date'].idxmax()]
+                # Sort by Edit Date to ensure we get the latest (handle NaT values)
+                matching_accounts = matching_accounts.copy()
+                matching_accounts = matching_accounts.dropna(subset=['Edit Date'])
                 
-                domain_to_account_info[domain] = {
-                    'Latest edit date': latest_record['Edit Date'],
-                    'Account Owner': latest_record['Account Owner'],
-                    'New Value': latest_record['New Value']
-                }
+                if len(matching_accounts) == 0:
+                    company_url_to_account_info[company_url] = {
+                        'Latest edit date': 'invalid date in account history',
+                        'Account Owner': 'invalid date in account history',
+                        'New Value': 'invalid date in account history'
+                    }
+                else:
+                    # Sort by Edit Date descending and take the first (latest)
+                    latest_record = matching_accounts.sort_values('Edit Date', ascending=False).iloc[0]
+                    
+                    logger.info(f"Company URL '{company_url}': Found {len(matching_accounts)} records, latest date: {latest_record['Edit Date']}")
+                    
+                    company_url_to_account_info[company_url] = {
+                        'Latest edit date': latest_record['Edit Date'],
+                        'Account Owner': latest_record['Account Owner'],
+                        'New Value': latest_record['New Value']
+                    }
         
         # Add new columns to successful_df
-        successful_df['Latest edit date'] = successful_df['domain_clean'].map(
-            lambda x: domain_to_account_info.get(x, {}).get('Latest edit date', 'domain not found')
+        successful_df['Latest edit date'] = successful_df['Company URL'].map(
+            lambda x: company_url_to_account_info.get(x, {}).get('Latest edit date', 'Company URL not found') if pd.notna(x) else 'Company URL is NaN'
         )
         
-        successful_df['Account Owner'] = successful_df['domain_clean'].map(
-            lambda x: domain_to_account_info.get(x, {}).get('Account Owner', 'domain not found')
+        successful_df['Account Owner'] = successful_df['Company URL'].map(
+            lambda x: company_url_to_account_info.get(x, {}).get('Account Owner', 'Company URL not found') if pd.notna(x) else 'Company URL is NaN'
         )
         
-        successful_df['New Value'] = successful_df['domain_clean'].map(
-            lambda x: domain_to_account_info.get(x, {}).get('New Value', 'domain not found')
+        successful_df['New Value'] = successful_df['Company URL'].map(
+            lambda x: company_url_to_account_info.get(x, {}).get('New Value', 'Company URL not found') if pd.notna(x) else 'Company URL is NaN'
         )
-        
-        # Remove temporary column
-        successful_df = successful_df.drop('domain_clean', axis=1)
         
         # Log statistics
-        domains_found = sum(1 for info in domain_to_account_info.values() 
-                          if info['Latest edit date'] != 'domain not found')
-        domains_not_found = len(domain_to_account_info) - domains_found
+        company_urls_found = sum(1 for info in company_url_to_account_info.values() 
+                               if info['Latest edit date'] != 'Company URL not found')
+        company_urls_not_found = len(company_url_to_account_info) - company_urls_found
         
         logger.info(f"Account History integration complete:")
-        logger.info(f"  Domains found: {domains_found}")
-        logger.info(f"  Domains not found: {domains_not_found}")
+        logger.info(f"  Company URLs found: {company_urls_found}")
+        logger.info(f"  Company URLs not found: {company_urls_not_found}")
         
         return successful_df
     

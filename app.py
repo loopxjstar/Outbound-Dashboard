@@ -32,19 +32,21 @@ def main():
         # File uploaders
         send_file = st.file_uploader("Upload Send Mails CSV", type=['csv'], key='send_mails')
         open_file = st.file_uploader("Upload Open Mails CSV", type=['csv'], key='open_mails')
+        contacts_file = st.file_uploader("Upload Contacts CSV", type=['csv'], key='contacts')
         account_history_file = st.file_uploader("Upload Account History CSV", type=['csv'], key='account_history')
         contact_file = st.file_uploader("Upload Contact CSV (Optional)", type=['csv'], key='contact')
         account_file = st.file_uploader("Upload Account CSV (Optional)", type=['csv'], key='account')
         
         # Process files button
         if st.button("Process Files", type="primary"):
-            if send_file and open_file and account_history_file:
+            if send_file and open_file and contacts_file and account_history_file:
                 with st.spinner("Processing files..."):
                     try:
                         # Save uploaded files
                         files = {
                             'send_mails': send_file,
                             'open_mails': open_file,
+                            'contacts': contacts_file,
                             'account_history': account_history_file,
                             'contact': contact_file,
                             'account': account_file
@@ -73,7 +75,7 @@ def main():
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
             else:
-                st.warning("Please upload Send Mails, Open Mails, and Account History CSV files")
+                st.warning("Please upload Send Mails, Open Mails, Contacts, and Account History CSV files")
     
     # Main dashboard
     if 'successful_data' in st.session_state:
@@ -122,30 +124,40 @@ def show_successful_dashboard(data):
         st.warning("No successful matches found.")
         return
     
-    # Dashboard controls
-    col1, col2, col3 = st.columns([2, 2, 2])
+    # Dashboard filters
+    st.subheader("📊 Dashboard Filters")
+    col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
     
     with col1:
-        analysis_type = st.selectbox(
-            "Analysis Type",
-            ["Week-on-Week", "Month-on-Month"],
-            key="analysis_type"
-        )
-    
-    with col2:
         # Date range selector
         min_date = data['sent_date'].min().date()
         max_date = data['sent_date'].max().date()
         
         date_range = st.date_input(
-            "Date Range",
+            "Sent Date Range",
             value=(min_date, max_date),
             min_value=min_date,
             max_value=max_date,
             key="date_range"
         )
     
+    with col2:
+        # Account Owner filter
+        account_owners = ['All'] + sorted(data['Account Owner'].dropna().unique().tolist())
+        selected_account_owner = st.selectbox(
+            "Account Owner",
+            account_owners,
+            key="account_owner_filter"
+        )
+    
     with col3:
+        analysis_type = st.selectbox(
+            "Analysis Type",
+            ["Week-on-Week", "Month-on-Month"],
+            key="analysis_type"
+        )
+    
+    with col4:
         # Metric selector
         metric = st.selectbox(
             "Primary Metric",
@@ -153,14 +165,27 @@ def show_successful_dashboard(data):
             key="metric"
         )
     
-    # Filter data based on date range
+    with col5:
+        # Reset filters button
+        if st.button("Reset Filters", type="secondary"):
+            st.rerun()
+    
+    # Apply filters
+    filtered_data = data.copy()
+    
+    # Filter by date range
     if len(date_range) == 2:
-        filtered_data = data[
-            (data['sent_date'].dt.date >= date_range[0]) & 
-            (data['sent_date'].dt.date <= date_range[1])
+        filtered_data = filtered_data[
+            (filtered_data['sent_date'].dt.date >= date_range[0]) & 
+            (filtered_data['sent_date'].dt.date <= date_range[1])
         ]
-    else:
-        filtered_data = data
+    
+    # Filter by Account Owner
+    if selected_account_owner != 'All':
+        filtered_data = filtered_data[filtered_data['Account Owner'] == selected_account_owner]
+    
+    # Show filter summary
+    st.info(f"📈 Showing {len(filtered_data):,} records (filtered from {len(data):,} total records)")
     
     # Create dashboard sections
     show_kpi_cards(filtered_data)
@@ -170,7 +195,7 @@ def show_successful_dashboard(data):
 def show_kpi_cards(data):
     st.subheader("📈 Key Performance Indicators")
     
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         total_sends = len(data)
@@ -197,6 +222,14 @@ def show_kpi_cards(data):
             st.metric("Open Rate", f"{open_rate:.1f}%")
         else:
             st.metric("Open Rate", "N/A")
+    
+    with col6:
+        # Accounts Owned - unique Company URL ID count
+        if 'Company URL ID' in data.columns:
+            accounts_owned = data['Company URL ID'].nunique()
+            st.metric("Accounts Owned", f"{accounts_owned:,}")
+        else:
+            st.metric("Accounts Owned", "N/A")
 
 def show_trend_charts(data, analysis_type, metric):
     st.subheader(f"📊 {analysis_type} Analysis")
@@ -279,22 +312,63 @@ def show_failed_records(failed_data):
                 title="Failure Reasons Distribution"
             )
             st.plotly_chart(fig, use_container_width=True)
+        
+        # Separate tables for different failure types
+        contact_failures = failed_data[failed_data['failure_reason'] == 'Send email not found in contacts']
+        other_failures = failed_data[failed_data['failure_reason'] != 'Send email not found in contacts']
+        
+        if len(contact_failures) > 0:
+            st.subheader("📧 Send email not found in contacts")
+            st.dataframe(
+                contact_failures.head(100),
+                use_container_width=True,
+                height=200
+            )
+            
+            # Download button for contact failures
+            contact_csv = contact_failures.to_csv(index=False)
+            st.download_button(
+                label="Download Contact Failures",
+                data=contact_csv,
+                file_name=f"contact_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="contact_failures"
+            )
+        
+        if len(other_failures) > 0:
+            st.subheader("📋 Other Failed Records")
+            st.dataframe(
+                other_failures.head(100),
+                use_container_width=True,
+                height=200
+            )
+            
+            # Download button for other failures
+            other_csv = other_failures.to_csv(index=False)
+            st.download_button(
+                label="Download Other Failures",
+                data=other_csv,
+                file_name=f"other_failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="other_failures"
+            )
+    else:
+        # Show all failed records table if no failure_reason column
+        st.subheader("📋 Failed Records Details")
+        st.dataframe(
+            failed_data.head(100),
+            use_container_width=True,
+            height=300
+        )
     
-    # Show failed records table
-    st.subheader("📋 Failed Records Details")
-    st.dataframe(
-        failed_data.head(100),
-        use_container_width=True,
-        height=300
-    )
-    
-    # Download button for failed records
+    # Download button for all failed records
     failed_csv = failed_data.to_csv(index=False)
     st.download_button(
-        label="Download Failed Records",
+        label="Download All Failed Records",
         data=failed_csv,
-        file_name=f"failed_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv"
+        file_name=f"all_failed_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key="all_failures"
     )
 
 if __name__ == "__main__":
