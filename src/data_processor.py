@@ -13,6 +13,7 @@ class DataProcessor:
         self.required_open_columns = ['recipient_name', 'sent_date', 'Views', 'Clicks']
         self.required_account_history_columns = ['Edit Date', 'Company URL', 'New Value', 'Account Owner']
         self.required_contacts_columns = ['Email']
+        self.required_opportunity_details_columns = ['Company URL', 'Amount', 'Created Date']
     
     def process_files(self, files):
         """
@@ -24,8 +25,9 @@ class DataProcessor:
             open_df = self._load_csv(files.get('open_mails') or files.get('open'), 'open_mails')
             contacts_df = self._load_csv(files.get('contacts'), 'contacts')
             account_history_df = self._load_csv(files.get('account_history'), 'account_history')
+            opportunity_details_df = self._load_csv(files.get('opportunity_details'), 'opportunity_details')
             
-            if send_df is None or open_df is None or contacts_df is None or account_history_df is None:
+            if send_df is None or open_df is None or contacts_df is None or account_history_df is None or opportunity_details_df is None:
                 return None, None
             
             # Validate required columns
@@ -40,12 +42,16 @@ class DataProcessor:
                 
             if not self._validate_columns(account_history_df, self.required_account_history_columns, 'account_history'):
                 return None, None
+                
+            if not self._validate_columns(opportunity_details_df, self.required_opportunity_details_columns, 'opportunity_details'):
+                return None, None
             
             # Clean and prepare data
             send_df = self._clean_data(send_df, 'send')
             open_df = self._clean_data(open_df, 'open')
             contacts_df = self._clean_data(contacts_df, 'contacts')
             account_history_df = self._clean_data(account_history_df, 'account_history')
+            opportunity_details_df = self._clean_data(opportunity_details_df, 'opportunity_details')
             
             # Perform incremental datetime join (send + open)
             send_open_successful, send_open_failed = self._join_send_open(send_df, open_df)
@@ -68,6 +74,10 @@ class DataProcessor:
             # Integrate Account History data
             if len(contacts_successful) > 0:
                 contacts_successful = self._integrate_account_history(contacts_successful, account_history_df)
+            
+            # Integrate Opportunity Details data (final step)
+            if len(contacts_successful) > 0:
+                contacts_successful = self._integrate_opportunity_details(contacts_successful, opportunity_details_df)
             
             successful_df = contacts_successful
             
@@ -131,6 +141,9 @@ class DataProcessor:
         
         if 'Edit Date' in df.columns:
             df['Edit Date'] = pd.to_datetime(df['Edit Date'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+            
+        if 'Created Date' in df.columns:
+            df['Created Date'] = pd.to_datetime(df['Created Date'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
         
         # Clean recipient names
         if 'recipient_name' in df.columns:
@@ -150,6 +163,9 @@ class DataProcessor:
                 df['Views'] = pd.to_numeric(df['Views'], errors='coerce').fillna(0)
             if 'Clicks' in df.columns:
                 df['Clicks'] = pd.to_numeric(df['Clicks'], errors='coerce').fillna(0)
+        elif file_type == 'opportunity_details':
+            if 'Amount' in df.columns:
+                df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
         
         # Remove rows with null key columns
         if file_type == 'send':
@@ -160,6 +176,8 @@ class DataProcessor:
             df = df.dropna(subset=['Edit Date', 'Company URL'])
         elif file_type == 'contacts':
             df = df.dropna(subset=['Email'])
+        elif file_type == 'opportunity_details':
+            df = df.dropna(subset=['Company URL', 'Amount', 'Created Date'])
         
         logger.info(f"Cleaned {file_type} data: {len(df)} rows remaining")
         return df
@@ -563,6 +581,78 @@ class DataProcessor:
         logger.info(f"Account History integration complete:")
         logger.info(f"  Company URLs found: {company_urls_found}")
         logger.info(f"  Company URLs not found: {company_urls_not_found}")
+        
+        return successful_df
+    
+    def _integrate_opportunity_details(self, successful_df, opportunity_details_df):
+        """Integrate Opportunity Details data with the final successful records"""
+        logger.info(f"Integrating Opportunity Details data with {len(successful_df)} successful records")
+        
+        # Check if Company URL column exists
+        if 'Company URL' not in successful_df.columns:
+            logger.error(f"Company URL column not found in successful records. Available columns: {list(successful_df.columns)}")
+            # Add placeholder columns for missing Company URL data
+            for col_name in opportunity_details_df.columns:
+                if col_name != 'Company URL':  # Don't duplicate the join key
+                    successful_df[col_name] = 'Company URL column not found'
+            return successful_df
+        
+        logger.info(f"Using Company URL column for Opportunity Details matching")
+        
+        # First, deduplicate opportunity_details_df by keeping only latest Created Date for each Company URL
+        logger.info(f"Deduplicating Opportunity Details: {len(opportunity_details_df)} records before deduplication")
+        
+        # Sort by Created Date descending and keep first (latest) for each Company URL
+        deduplicated_opportunities = opportunity_details_df.sort_values('Created Date', ascending=False).drop_duplicates(subset=['Company URL'], keep='first')
+        
+        duplicates_removed = len(opportunity_details_df) - len(deduplicated_opportunities)
+        logger.info(f"Removed {duplicates_removed} duplicate records, keeping {len(deduplicated_opportunities)} unique Company URLs with latest Created Date")
+        
+        # Create lookup dictionary for opportunity details (now guaranteed one record per Company URL)
+        opportunity_lookup = {}
+        
+        for idx, opp_record in deduplicated_opportunities.iterrows():
+            company_url = opp_record['Company URL']
+            if pd.notna(company_url):
+                opportunity_lookup[company_url] = opp_record  # Single record, not a list
+        
+        logger.info(f"Created opportunity lookup with {len(opportunity_lookup)} unique Company URLs")
+        
+        # Get all opportunity columns except Company URL (join key)
+        opportunity_columns = [col for col in deduplicated_opportunities.columns if col != 'Company URL']
+        
+        # Initialize all opportunity columns with empty values for all records
+        for col_name in opportunity_columns:
+            successful_df[col_name] = ''
+        
+        # Track statistics
+        matched_companies = 0
+        
+        # Iterate through each successful record and try to match opportunities
+        for idx in successful_df.index:
+            company_url = successful_df.loc[idx, 'Company URL']
+            
+            if pd.notna(company_url) and company_url in opportunity_lookup:
+                # Found matching opportunity (single record now)
+                opportunity_record = opportunity_lookup[company_url]
+                matched_companies += 1
+                
+                # Attach opportunity fields for this Company URL
+                for col_name in opportunity_columns:
+                    if pd.notna(opportunity_record[col_name]):
+                        successful_df.loc[idx, col_name] = opportunity_record[col_name]
+                    else:
+                        successful_df.loc[idx, col_name] = ''
+        
+        # Log statistics
+        unique_company_urls = successful_df['Company URL'].nunique()
+        companies_not_found = unique_company_urls - matched_companies
+        
+        logger.info(f"Opportunity Details integration complete:")
+        logger.info(f"  Unique Company URLs in final data: {unique_company_urls}")
+        logger.info(f"  Company URLs with opportunities: {matched_companies}")
+        logger.info(f"  Company URLs without opportunities: {companies_not_found}")
+        logger.info(f"  Total opportunities attached: {matched_companies} (1:1 mapping)")
         
         return successful_df
     

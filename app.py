@@ -34,12 +34,13 @@ def main():
         open_file = st.file_uploader("Upload Open Mails CSV", type=['csv'], key='open_mails')
         contacts_file = st.file_uploader("Upload Contacts CSV", type=['csv'], key='contacts')
         account_history_file = st.file_uploader("Upload Account History CSV", type=['csv'], key='account_history')
+        opportunity_details_file = st.file_uploader("Upload Opportunity Details CSV", type=['csv'], key='opportunity_details')
         contact_file = st.file_uploader("Upload Contact CSV (Optional)", type=['csv'], key='contact')
         account_file = st.file_uploader("Upload Account CSV (Optional)", type=['csv'], key='account')
         
         # Process files button
         if st.button("Process Files", type="primary"):
-            if send_file and open_file and contacts_file and account_history_file:
+            if send_file and open_file and contacts_file and account_history_file and opportunity_details_file:
                 with st.spinner("Processing files..."):
                     try:
                         # Save uploaded files
@@ -48,6 +49,7 @@ def main():
                             'open_mails': open_file,
                             'contacts': contacts_file,
                             'account_history': account_history_file,
+                            'opportunity_details': opportunity_details_file,
                             'contact': contact_file,
                             'account': account_file
                         }
@@ -75,7 +77,7 @@ def main():
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
             else:
-                st.warning("Please upload Send Mails, Open Mails, Contacts, and Account History CSV files")
+                st.warning("Please upload Send Mails, Open Mails, Contacts, Account History, and Opportunity Details CSV files")
     
     # Main dashboard
     if 'successful_data' in st.session_state:
@@ -88,14 +90,21 @@ def show_welcome_message():
     
     # Show expected file formats
     with st.expander("📋 Expected CSV File Formats"):
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.subheader("Send Mails CSV")
             st.code("""
-recipient_name,sent_date,domain,campaign_id
-john@example.com,02/07/2025 19:34:57,example.com,CAMP001
-jane@test.com,02/07/2025 19:35:12,test.com,CAMP002
+recipient_name,sent_date,Recipient Email
+john@example.com,02/07/2025 19:34:57,john@example.com
+jane@test.com,02/07/2025 19:35:12,jane@test.com
+            """)
+            
+            st.subheader("Contacts CSV")
+            st.code("""
+Email,Company URL,Name,Title
+john@example.com,example.com,John Doe,Manager
+jane@test.com,test.com,Jane Smith,Director
             """)
         
         with col2:
@@ -104,6 +113,22 @@ jane@test.com,02/07/2025 19:35:12,test.com,CAMP002
 recipient_name,sent_date,Views,Clicks
 john@example.com,02/07/2025 19:35:02,1,2
 jane@test.com,02/07/2025 19:35:15,0,0
+            """)
+            
+            st.subheader("Account History CSV")
+            st.code("""
+Edit Date,Company URL,New Value,Account Owner
+02/07/2025 10:00:00,example.com,Status Updated,John Smith
+03/07/2025 15:30:00,test.com,Contact Added,Jane Doe
+            """)
+        
+        with col3:
+            st.subheader("Opportunity Details CSV")
+            st.code("""
+Company URL,Amount,Created Date
+example.com,50000,02/07/2025 09:00:00
+test.com,75000,03/07/2025 14:00:00
+example.com,25000,04/07/2025 16:30:00
             """)
 
 def show_dashboard():
@@ -190,12 +215,13 @@ def show_successful_dashboard(data):
     # Create dashboard sections
     show_kpi_cards(filtered_data)
     show_trend_charts(filtered_data, analysis_type, metric)
+    show_engagement_table(filtered_data)
     show_data_table(filtered_data)
 
 def show_kpi_cards(data):
     st.subheader("📈 Key Performance Indicators")
     
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns(9)
     
     with col1:
         total_sends = len(data)
@@ -230,6 +256,187 @@ def show_kpi_cards(data):
             st.metric("Accounts Owned", f"{accounts_owned:,}")
         else:
             st.metric("Accounts Owned", "N/A")
+    
+    with col7:
+        # Total Opportunity Amount - filtered by Latest edit date and account owner
+        total_opportunity_amount = calculate_filtered_opportunity_amount(data)
+        st.metric("Total Opp. Amount", f"${total_opportunity_amount:,.0f}")
+    
+    with col8:
+        # Time to Opportunity - average days from Latest edit date to Created Date
+        avg_time_to_opportunity = calculate_time_to_opportunity(data)
+        st.metric("Time to Opp.", f"{avg_time_to_opportunity:.1f} days")
+    
+    with col9:
+        # High Engagement Accounts Count - companies with views > 2x emails sent
+        high_engagement_count = calculate_high_engagement_accounts(data)
+        st.metric("High Engagement", f"{high_engagement_count:,}")
+
+def calculate_filtered_opportunity_amount(data):
+    """
+    Calculate total opportunity amount based on current filters
+    - Works on unique Company URL records to avoid double counting
+    - Filters by Latest edit date within the selected date range
+    - Filters by Account Owner matching the selected account owner
+    - Each Company URL now has single opportunity amount (no pipe-separated values)
+    """
+    if 'Amount' not in data.columns or 'Latest edit date' not in data.columns or 'Company URL' not in data.columns:
+        return 0
+    
+    # Get current filter values from session state
+    date_range = st.session_state.get('date_range', None)
+    selected_account_owner = st.session_state.get('account_owner_filter', 'All')
+    
+    # Work with unique Company URL records only
+    unique_company_data = data.drop_duplicates(subset=['Company URL'], keep='first')
+    
+    total_amount = 0
+    
+    for idx, row in unique_company_data.iterrows():
+        # Skip rows without opportunity data
+        if pd.isna(row['Amount']) or row['Amount'] == '':
+            continue
+        
+        # Apply date range filter based on Latest edit date
+        date_matches = True
+        if date_range and len(date_range) == 2:
+            latest_edit_date = row.get('Latest edit date', '')
+            if latest_edit_date and latest_edit_date != '' and latest_edit_date != 'Company URL not found':
+                try:
+                    # Handle different possible date formats from Latest edit date
+                    if isinstance(latest_edit_date, str):
+                        # Try pandas timestamp format first
+                        edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                    else:
+                        edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                    
+                    if pd.notna(edit_date):
+                        date_matches = (edit_date.date() >= date_range[0]) and (edit_date.date() <= date_range[1])
+                    else:
+                        date_matches = False
+                except (ValueError, TypeError):
+                    date_matches = False
+        
+        # Apply account owner filter
+        account_owner_matches = True
+        if selected_account_owner != 'All':
+            account_owner_matches = (row.get('Account Owner', '') == selected_account_owner)
+        
+        # If both filters match, add the opportunity amount for this unique company
+        if date_matches and account_owner_matches:
+            try:
+                amount = float(row['Amount']) if row['Amount'] and row['Amount'] != '' else 0
+                total_amount += amount
+            except (ValueError, TypeError):
+                # Skip invalid amounts
+                continue
+                
+    return total_amount
+
+def calculate_time_to_opportunity(data):
+    """
+    Calculate average time from Latest edit date to Created Date for records with opportunities
+    - Works on unique Company URL records to avoid double counting
+    - Filters by Latest edit date within the selected date range
+    - Filters by Account Owner matching the selected account owner
+    - Each Company URL now has single Created Date (no pipe-separated values)
+    """
+    if 'Amount' not in data.columns or 'Latest edit date' not in data.columns or 'Created Date' not in data.columns or 'Company URL' not in data.columns:
+        return 0
+    
+    # Get current filter values from session state
+    date_range = st.session_state.get('date_range', None)
+    selected_account_owner = st.session_state.get('account_owner_filter', 'All')
+    
+    # Work with unique Company URL records only
+    unique_company_data = data.drop_duplicates(subset=['Company URL'], keep='first')
+    
+    time_differences = []
+    
+    for idx, row in unique_company_data.iterrows():
+        # Skip rows without opportunity data
+        if pd.isna(row['Amount']) or row['Amount'] == '' or pd.isna(row['Created Date']) or row['Created Date'] == '':
+            continue
+        
+        # Apply date range filter based on Latest edit date
+        date_matches = True
+        if date_range and len(date_range) == 2:
+            latest_edit_date = row.get('Latest edit date', '')
+            if latest_edit_date and latest_edit_date != '' and latest_edit_date != 'Company URL not found':
+                try:
+                    # Handle different possible date formats from Latest edit date
+                    if isinstance(latest_edit_date, str):
+                        edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                    else:
+                        edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                    
+                    if pd.notna(edit_date):
+                        date_matches = (edit_date.date() >= date_range[0]) and (edit_date.date() <= date_range[1])
+                    else:
+                        date_matches = False
+                except (ValueError, TypeError):
+                    date_matches = False
+        
+        # Apply account owner filter
+        account_owner_matches = True
+        if selected_account_owner != 'All':
+            account_owner_matches = (row.get('Account Owner', '') == selected_account_owner)
+        
+        # If both filters match, calculate time difference for this unique company
+        if date_matches and account_owner_matches:
+            latest_edit_date = row.get('Latest edit date', '')
+            created_date = row.get('Created Date', '')
+            
+            # Parse Latest edit date and Created Date
+            try:
+                if isinstance(latest_edit_date, str):
+                    edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                else:
+                    edit_date = pd.to_datetime(latest_edit_date, errors='coerce')
+                
+                if isinstance(created_date, str):
+                    created_dt = pd.to_datetime(created_date, errors='coerce')
+                else:
+                    created_dt = pd.to_datetime(created_date, errors='coerce')
+                
+                if pd.notna(edit_date) and pd.notna(created_dt):
+                    # Calculate difference in days (Created Date - Latest edit date)
+                    time_diff = (created_dt - edit_date).days
+                    time_differences.append(time_diff)
+            except (ValueError, TypeError):
+                continue
+    
+    # Return average time difference
+    if time_differences:
+        return sum(time_differences) / len(time_differences)
+    else:
+        return 0
+
+def calculate_high_engagement_accounts(data):
+    """
+    Calculate count of high engagement accounts
+    High engagement = companies where Total Views > 2 × Total Emails Sent
+    - Respects current date range and account owner filters
+    - Groups by Company URL to get company-level metrics
+    """
+    if 'Company URL' not in data.columns or 'Views' not in data.columns:
+        return 0
+    
+    # Group by Company URL to get company-level aggregation
+    company_engagement = data.groupby('Company URL').agg({
+        'recipient_name': 'count',  # Total emails sent to this company
+        'Views': 'sum',             # Total views from this company
+        'Clicks': 'sum'             # Total clicks from this company
+    }).reset_index()
+    
+    company_engagement.columns = ['Company URL', 'Total_Emails', 'Total_Views', 'Total_Clicks']
+    
+    # Apply high engagement logic: Views > 2 × Emails
+    high_engagement_companies = company_engagement[
+        company_engagement['Total_Views'] > (2 * company_engagement['Total_Emails'])
+    ]
+    
+    return len(high_engagement_companies)
 
 def show_trend_charts(data, analysis_type, metric):
     st.subheader(f"📊 {analysis_type} Analysis")
@@ -266,6 +473,83 @@ def show_trend_charts(data, analysis_type, metric):
     )
     
     st.plotly_chart(fig, use_container_width=True)
+
+def show_engagement_table(data):
+    st.subheader("🔥 Company Engagement Analysis")
+    
+    if 'Company URL' not in data.columns or len(data) == 0:
+        st.warning("No company data available for engagement analysis.")
+        return
+    
+    # Group by Company URL to get company-level engagement metrics
+    company_engagement = data.groupby('Company URL').agg({
+        'recipient_name': 'count',  # Total emails sent
+        'Views': 'sum',             # Total views
+        'Clicks': 'sum'             # Total clicks
+    }).reset_index()
+    
+    company_engagement.columns = ['Company URL', 'Total Emails', 'Total Views', 'Total Clicks']
+    
+    # Calculate engagement rate and high engagement flag
+    company_engagement['Engagement Rate'] = (company_engagement['Total Views'] / company_engagement['Total Emails'] * 100).round(1)
+    company_engagement['High Engagement'] = company_engagement['Total Views'] > (2 * company_engagement['Total Emails'])
+    
+    # Sort by engagement rate descending
+    company_engagement = company_engagement.sort_values('Engagement Rate', ascending=False)
+    
+    # Display summary
+    total_companies = len(company_engagement)
+    high_engagement_count = company_engagement['High Engagement'].sum()
+    st.info(f"📊 **{total_companies}** companies analyzed • **{high_engagement_count}** high engagement accounts (Views > 2× Emails)")
+    
+    # Display engagement table with expandable rows
+    for idx, company_row in company_engagement.iterrows():
+        company_url = company_row['Company URL']
+        total_emails = company_row['Total Emails']
+        total_views = company_row['Total Views']
+        total_clicks = company_row['Total Clicks']
+        engagement_rate = company_row['Engagement Rate']
+        is_high_engagement = company_row['High Engagement']
+        
+        # Create expandable section for each company
+        engagement_indicator = "🔥 HIGH" if is_high_engagement else "📊 Normal"
+        
+        with st.expander(f"{engagement_indicator} | **{company_url}** | {total_emails} emails • {total_views} views • {total_clicks} clicks • {engagement_rate}% rate"):
+            # Get recipient-level data for this company
+            company_data = data[data['Company URL'] == company_url].copy()
+            
+            if len(company_data) > 0:
+                # Show individual emails (records) for this company
+                # Each record represents one email sent
+                individual_emails = company_data[['sent_date', 'Recipient Email', 'Views', 'Clicks']].copy()
+                
+                # Sort options
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    sort_option = st.selectbox(
+                        "Sort by:",
+                        ['Views', 'Clicks', 'sent_date'],
+                        key=f"sort_{company_url}"
+                    )
+                
+                # Sort the data
+                ascending = sort_option == 'sent_date'  # Only sent_date in ascending, others descending
+                individual_emails = individual_emails.sort_values(sort_option, ascending=ascending)
+                
+                # Display individual emails table
+                st.dataframe(
+                    individual_emails[['sent_date', 'Recipient Email', 'Views', 'Clicks']],
+                    use_container_width=True,
+                    height=min(300, len(individual_emails) * 35 + 50)  # Dynamic height
+                )
+                
+                # Show email summary for verification
+                total_individual_emails = len(individual_emails)
+                total_individual_views = individual_emails['Views'].sum()
+                total_individual_clicks = individual_emails['Clicks'].sum()
+                st.info(f"📧 **{total_individual_emails}** emails sent • **{total_individual_views}** total views • **{total_individual_clicks}** total clicks")
+            else:
+                st.warning("No recipient data available for this company.")
 
 def show_data_table(data):
     st.subheader("📋 Data Table")
