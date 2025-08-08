@@ -27,7 +27,7 @@ MANIFEST
 
 # Uploads
 uploads/
-data/*.csv
+# data/*.csv  # Commented out to allow contacts.csv to be included
 
 # Environment variables
 .env
