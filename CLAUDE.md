@@ -1,7 +1,7 @@
-# CSV Processing Dashboard Project - ENHANCED WITH 5th SHEET ✅
+# CSV Processing Dashboard Project - 2 FILE SYSTEM with ENHANCED VALIDATION ✅
 
 ## Project Overview 
-Building an application that accepts 5 CSV files as input (Send Mails, Open Mails, Contacts, Account History, Opportunity Details), runs sophisticated joins on them, and creates an advanced dashboard for analytics with filtering capabilities.
+Building an application that accepts 2 CSV files as input (Send Mails, Open Mails), runs sophisticated joins on them, and creates an advanced dashboard for analytics with filtering capabilities. Uses internal Contacts database for company mapping. Enhanced with comprehensive validation, column mapping, and advanced data preprocessing.
 
 ## Requirements ✅
 - **CSV File Size**: 100KB max per file ✅
@@ -19,13 +19,75 @@ Building an application that accepts 5 CSV files as input (Send Mails, Open Mail
 - **File Storage**: Local filesystem with CSV export ✅
 - **Deployment**: Render (FREE tier) ✅
 
-## Final Architecture ✅
+## Enhanced Architecture ✅
 ```
-[5 CSV Uploads] → [Streamlit App] → [Advanced Data Pipeline] → [Interactive Dashboard]
-                                         ↓
-    [Send-Open Join] → [Contacts Join] → [Account History Join] → [Opportunity Details Join]
-                                         ↓
-                    [339 Final Records + 164 Failed Records] → [Filtered Analytics + Opportunity KPIs]
+[2 CSV Uploads] → [Validation & Column Mapping] → [Advanced Data Preprocessing] → [Interactive Dashboard]
+                                ↓
+            [Send Mails: Domain Filter + Time Adjust + Text Clean]
+            [Open Mails: Comma Split + Date Format Convert]
+                                ↓
+    [Send-Open Join] → [Internal Contacts Database Join]
+                                ↓
+                    [Enhanced Analytics with Improved Data Quality]
+```
+
+## Enhanced Validation & Preprocessing System ✅
+
+### Phase 0: Comprehensive File Validation (BEFORE Processing)
+```python
+# Step 1: Column Mapping & Header Validation
+'send_mails': {
+    'Recipient Name': 'recipient_name',    # User header → System header
+    'Date': 'sent_date',                   # User header → System header
+    'Recipient Email': 'Recipient Email'   # Keep as-is
+}
+'open_mails': {
+    'Recipient': 'recipient_name',         # User header → System header
+    'Sent': 'sent_date',                   # User header → System header
+    'Opens': 'Views',                      # User header → System header
+    'Clicks': 'Clicks',                   # Keep as-is
+    'Last Opened': 'last_opened'          # User header → System header
+}
+
+# Step 2: Data Content Validation
+- Date format validation (DD/MM/YYYY HH:MM:SS)
+- Email format validation (contains @)
+- Numeric validation (Views, Clicks)
+- Empty file detection
+- Missing column detection with clear error messages
+```
+
+### Advanced Data Preprocessing Rules
+
+#### **Send Mails CSV Preprocessing:**
+```python
+# Rule 1: Domain Filtering
+- Remove all records containing "loopwork.co" in Domain column
+- Case-insensitive matching with detailed logging
+
+# Rule 2: Time Adjustment  
+- Add 9 hours 30 minutes to all sent_date values
+- Automatic date rollover handling (e.g., 23:30 + 9:30 = next day 09:00)
+- Before/after logging with date change indicators
+
+# Rule 3: Recipient Name Cleaning
+- Split by '<' symbol and extract part before '<'
+- "Daniel Novak <dan@landish.ca>" → "Daniel Novak"
+- "erin@landish.ca" → "erin@landish.ca" (no change if no '<')
+- Automatic space trimming
+```
+
+#### **Open Mails CSV Preprocessing:**
+```python
+# Rule 1: Recipient Name Comma Splitting
+- Split by ',' and take first value only
+- "Breanna Hughes,Bailee Cooper,Harshit Gupta" → "Breanna Hughes"
+- "John Doe" → "John Doe" (no change if no comma)
+
+# Rule 2: Date Format Standardization
+- Convert from "Jul 3, 2025, 02:14:21" to "03/07/2025 02:14:21"
+- Handles various month name formats automatically
+- Flexible parsing with fallback to original on errors
 ```
 
 ## Data Processing Pipeline (COMPLETED) ✅
@@ -35,6 +97,7 @@ Building an application that accepts 5 CSV files as input (Send Mails, Open Mail
 # Phase 1: 0-11 second incremental matching (99.4% success rate)
 # Phase 2: 12-60 second matching on failed records
 # Final: 500/503 successful matches
+# Enhanced error handling prevents division by zero errors
 ```
 
 ### Phase 2: Contacts Integration
@@ -42,43 +105,32 @@ Building an application that accepts 5 CSV files as input (Send Mails, Open Mail
 # Join on: send_open['Recipient Email'] = contacts['Email']
 # Many-to-one matching (multiple send records → one contact)
 # Result: 339 successful + 161 failed = 500 total (perfect count preservation)
+# Safe division check: "No records matched with contacts sheet" error message
 ```
 
-### Phase 3: Account History Integration
+### Phase 3: Final Output (2-File System)
 ```python
-# Company URL unique ID generation (1-64)
-# Join on: contacts['Company URL'] = account_history['Company URL']
-# Latest edit date selection with proper sorting
-# Result: 21/64 Company URLs found in Account History
-```
-
-### Phase 4: Opportunity Details Integration ✨ (NEW)
-```python
-# Pre-processing: Deduplicate opportunities by Company URL (keep latest Created Date)
-# Join on: final_data['Company URL'] = opportunity_details['Company URL']
-# One-to-one mapping: Each Company URL has single opportunity record
-# All opportunity fields attached to matching Company URLs
-# Empty values for Company URLs without opportunities
+# Final processing complete after Contacts integration
+# Ready for dashboard analytics and filtering with Company URL data
+# Account History integration removed for simplified processing
 ```
 
 ## Advanced Dashboard Features (COMPLETED) ✅
 
 ### Dashboard Filters
 - **📅 Sent Date Range**: Dynamic date picker for time-based filtering
-- **👤 Account Owner**: Dropdown filter with all unique owners + "All" option
-- **🔄 Reset Filters**: One-click filter reset functionality
+- **🔄 Reset Filters**: One-click filter reset functionality  
 - **📊 Filter Summary**: Shows "X records (filtered from Y total)"
+- **Note**: Account Owner filter removed in 2-file system
 
-### KPI Cards (9 Total)
+### KPI Cards (7 Total)
 1. **Total Sends**: Count of filtered records
 2. **Total Views**: Sum of Views column
 3. **Total Clicks**: Sum of Clicks column  
 4. **View Rate**: (Total Views / Total Sends) × 100
 5. **Open Rate**: Based on last_opened column analysis
 6. **Accounts Owned**: Unique count of Company URL IDs
-7. **Total Opportunity Amount**: Sum of opportunity amounts (one per Company URL) filtered by Latest edit date and Account Owner ✨ (NEW)
-8. **Time to Opportunity**: Average days from Latest edit date to Created Date (latest opportunity per Company URL) ✨ (NEW)
-9. **High Engagement Accounts**: Count of companies where Total Views > 2 × Total Emails Sent ✨ (NEW)
+7. **High Engagement Accounts**: Count of companies where Total Views > 2 × Total Emails Sent
 
 ### Analytics Features
 - **Real-time filtering**: All KPIs and charts update instantly
@@ -89,52 +141,43 @@ Building an application that accepts 5 CSV files as input (Send Mails, Open Mail
 
 ## Final Data Model ✅
 
-### Required CSV Columns
+### Required CSV Columns with Enhanced Validation ✨
 1. **Send Mails CSV**:
-   - `recipient_name` (for datetime join)
-   - `sent_date` (DD/MM/YYYY HH:MM:SS format)
-   - `Recipient Email` (for contacts join) ✨
+   - `recipient_name` (for datetime join) - Auto-cleaned and standardized
+   - `sent_date` (DD/MM/YYYY HH:MM:SS format) - +9:30 hours adjustment applied
+   - `Recipient Email` (for contacts join) - Validated email format
 
 2. **Open Mails CSV**:
-   - `recipient_name` (for datetime join)
-   - `sent_date` (DD/MM/YYYY HH:MM:SS format)
-   - `Views` (renamed from "Opens")
-   - `Clicks`
+   - `recipient_name` (for datetime join) - Auto-cleaned and standardized 
+   - `sent_date` (DD/MM/YYYY HH:MM:SS format) - No time adjustment
+   - `Views` (renamed from "Opens") - Numeric validation
+   - `Clicks` - Numeric validation
 
-3. **Contacts CSV**:
-   - `Email` (join key)
-   - `Company URL` (for account history join)
+3. **Internal Contacts Database** (data/contacts.csv):
+   - `Email` (join key) - Email format validation
+   - `Company URL` (for company mapping) - Auto-filtered (excludes loopwork.co)
    - All other contact fields (merged to final output)
 
-4. **Account History CSV**:
-   - `Edit Date` (DD/MM/YYYY HH:MM:SS format)
-   - `Company URL` (join key)
-   - `New Value`
-   - `Account Owner`
+~~4. **Account History CSV** (REMOVED in 2-file system)~~
 
-5. **Opportunity Details CSV** ✨ (NEW):
-   - `Company URL` (join key)
-   - `Amount` (numeric opportunity value)
-   - `Created Date` (DD/MM/YYYY HH:MM:SS format)
 
 ### Final Output Schema
 ```
-send_open_contacts_account_history_opportunities = 
-  Send Mails fields +
+send_open_contacts = 
+  Send Mails fields (with +9:30 hours adjustment) +
   Open Mails fields (Views, Clicks) +
-  All Contacts fields +
-  Account History fields (Latest edit date, Account Owner, New Value) +
-  Opportunity Details fields (Amount, Created Date) +
-  Company URL ID (unique incremental ID)
+  All Contacts fields (filtered for loopwork.co domains) +
+  Company URL ID (unique incremental ID) +
+  Enhanced validation status and error tracking
 ```
 
 ## Processing Results ✅
 - **Input**: 503 Send Mails records
 - **Send-Open Join**: 500 successful (99.4% success rate)
 - **Contacts Join**: 339 successful (67.8% success rate) 
-- **Account History**: 21/64 Company URLs matched
 - **Final Output**: 339 complete records + 164 failed records
 - **Perfect Count Preservation**: Input = Output (no duplicate creation)
+- **Note**: Account History processing removed in 2-file system
 
 ## Advanced Join Algorithms (IMPLEMENTED) ✅
 
@@ -146,13 +189,44 @@ send_open_contacts_account_history_opportunities =
 # Avoids duplicate matching by tracking used open records
 ```
 
-### Many-to-One Contact Matching
+### Many-to-One Contact Matching with Division by Zero Prevention
 ```python
 # Creates lookup dictionary from contacts (first occurrence wins)
 # Iterates through send-open records individually
 # Merges all contact fields to each matching send-open record
 # Maintains exact record count (no pandas merge duplicates)
+# Safe division check: if len(send_open_df) > 0 before calculations
+# Enhanced error handling: "No records matched with contacts sheet"
+# 3-tuple return format: (successful_data, failed_data, validation_errors)
 ```
+
+## Enhanced Error Handling & User Experience ✅
+
+### Comprehensive Error Messages
+```python
+# File Validation Errors
+❌ **Missing File**: Send Mails CSV is required but not uploaded.
+❌ **Empty File**: Open Mails CSV contains no data rows.
+❌ **Missing Columns**: 'Recipient Name' (maps to 'recipient_name'), 'Date' (maps to 'sent_date')
+📋 **Available Columns in the uploaded sheet**: Date, Subject, Email, Domain
+
+# Data Format Errors  
+❌ **Date Format Error**: 3 rows have invalid date format in 'sent_date'. Expected: DD/MM/YYYY HH:MM:SS
+❌ **Email Format Error**: 2 rows have invalid email format in 'Email'
+❌ **Numeric Format Error**: 1 rows have non-numeric values in 'Views'
+
+# Processing Errors
+❌ **No records matched with contacts sheet**: No emails from Send-Open data found in Contacts CSV
+❌ **Join Error**: Failed to join Send Mails and Open Mails data
+❌ **File Processing Error**: 'utf-8' codec can't decode byte (encoding issues)
+```
+
+### User-Friendly Features
+- **Clear column mapping explanations**: Shows what user headers map to internally
+- **Before/after examples**: Shows data transformations with visual indicators
+- **Progress logging**: Detailed processing steps with emoji indicators  
+- **Safe division**: Prevents "division by zero" errors
+- **Encoding flexibility**: Handles different file encodings automatically
 
 ### Company URL ID System
 ```python
@@ -187,8 +261,10 @@ send_open_contacts_account_history_opportunities =
 ### Data Processing Excellence
 - **99.4% join success rate** through intelligent datetime matching
 - **Exact record count preservation** preventing data duplication
-- **Robust error handling** with detailed failure categorization
+- **Robust error handling** with detailed failure categorization and division by zero prevention
 - **Performance optimization** with lookup dictionaries and efficient algorithms
+- **Enhanced validation system** with column mapping and preprocessing rules
+- **Multi-encoding support** for UTF-8, Latin-1, and CP1252 character sets
 
 ### Dashboard Innovation
 - **Real-time filtering** across all metrics and visualizations
@@ -218,12 +294,19 @@ send_open_contacts_account_history_opportunities =
 4. **Record Count Fix**: Resolved duplicate creation issue ensuring input = output counts
 5. **Advanced Dashboard Filters**: Added sent_date range and Account Owner filtering
 6. **Enhanced KPIs**: Added "Accounts Owned" metric with real-time filter updates
+7. **Enhanced Validation System**: Comprehensive column mapping and preprocessing rules ✨
+8. **Division by Zero Fix**: Safe error handling with clear user messages ✨
+9. **Multi-Encoding Support**: Automatic handling of different file character encodings ✨
 
 ### Technical Problem Solving
 - **Fixed join column mismatch**: Changed from "recipient_name" to "Recipient Email" for contacts join
 - **Resolved record duplication**: Replaced pandas merge with iteration-based approach
 - **Optimized performance**: Implemented lookup dictionaries for faster matching
 - **Enhanced error handling**: Added comprehensive failure categorization and logging
+- **Division by zero prevention**: Added safe validation checks with clear error messages ✨
+- **Character encoding issues**: Implemented multi-encoding detection (UTF-8, Latin-1, CP1252) ✨
+- **Column mapping system**: Flexible header validation with user-friendly mapping explanations ✨
+- **Data preprocessing rules**: Advanced filtering and cleaning before join operations ✨
 
 ### Data Processing Evolution
 ```python
@@ -261,4 +344,4 @@ The CSV Analytics Dashboard is now a production-ready application that successfu
 - **Production Repository**: https://github.com/loopxjstar/Outbound-Dashboard
 - **Deployment Platform**: Render (Free Tier)
 
-**Project successfully completed with 100% requirement fulfillment and advanced feature enhancements.**
+**Project successfully configured for 2-file system with streamlined processing and all core functionality intact.**
