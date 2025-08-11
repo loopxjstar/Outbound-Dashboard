@@ -624,26 +624,37 @@ def show_trend_charts(data, analysis_type, metric):
     selected_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
     
     # Handle bar click events to update date range filter
-    if selected_data and hasattr(selected_data, 'selection') and selected_data.selection:
-        if 'points' in selected_data.selection and len(selected_data.selection['points']) > 0:
-            # Get the clicked bar index
-            clicked_point = selected_data.selection['points'][0]
-            if 'point_index' in clicked_point:
-                point_index = clicked_point['point_index']
-                
-                # Get the date range for the clicked period
-                clicked_period_start = trend_data.iloc[point_index]['period_start']
-                clicked_period_end = trend_data.iloc[point_index]['period_end']
-                
-                # Update session state with the new date range
-                st.session_state.clicked_date_range = (clicked_period_start, clicked_period_end)
-                
-                # Show selected period info
-                st.info(f"📅 Selected Period: {clicked_period_start} to {clicked_period_end}")
-                st.info("💡 The date range filter above has been updated! The page will refresh automatically to show filtered data.")
-                
-                # Trigger a rerun to apply the new filter
-                st.rerun()
+    try:
+        if selected_data and hasattr(selected_data, 'selection'):
+            selection = selected_data.selection
+            # Check if selection is callable (function) and call it, or use directly
+            if callable(selection):
+                selection = selection()
+            
+            # Now check if selection exists and has the expected structure
+            if selection and isinstance(selection, dict) and 'points' in selection:
+                if len(selection['points']) > 0:
+                    # Get the clicked bar index
+                    clicked_point = selection['points'][0]
+                    if isinstance(clicked_point, dict) and 'point_index' in clicked_point:
+                        point_index = clicked_point['point_index']
+                        
+                        # Get the date range for the clicked period
+                        clicked_period_start = trend_data.iloc[point_index]['period_start']
+                        clicked_period_end = trend_data.iloc[point_index]['period_end']
+                        
+                        # Update session state with the new date range
+                        st.session_state.clicked_date_range = (clicked_period_start, clicked_period_end)
+                        
+                        # Show selected period info
+                        st.info(f"📅 Selected Period: {clicked_period_start} to {clicked_period_end}")
+                        st.info("💡 The date range filter above has been updated! The page will refresh automatically to show filtered data.")
+                        
+                        # Trigger a rerun to apply the new filter
+                        st.rerun()
+    except (TypeError, AttributeError, KeyError, IndexError) as e:
+        # Silently handle any issues with chart interaction - chart will still display normally
+        pass
     
     # Check if we need to apply a clicked date range
     if 'clicked_date_range' in st.session_state:
