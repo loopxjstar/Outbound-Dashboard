@@ -256,9 +256,8 @@ def show_successful_dashboard(data, original_send_count):
     with col4:
         # Reset filters button
         if st.button("Reset Filters", type="secondary"):
-            # Clear clicked date range from session state
-            if 'clicked_date_range' in st.session_state:
-                del st.session_state.clicked_date_range
+            # Clear clicked date range from session state safely
+            st.session_state.pop('clicked_date_range', None)
             st.rerun()
     
     # Apply filters to all datasets
@@ -621,17 +620,20 @@ def show_trend_charts(data, analysis_type, metric):
     )
     
     # Display the chart and capture click events
-    selected_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+    try:
+        selected_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+    except TypeError:
+        # Fallback for older Streamlit versions that don't support on_select
+        selected_data = st.plotly_chart(fig, use_container_width=True)
     
     # Handle bar click events to update date range filter
     try:
         if selected_data and hasattr(selected_data, 'selection'):
             selection = selected_data.selection
-            # Check if selection is callable (function) and call it, or use directly
-            if callable(selection):
-                selection = selection()
+            # Use selection directly without calling it as a function
+            # This fixes the StreamlitAPIException in production
             
-            # Now check if selection exists and has the expected structure
+            # Check if selection exists and has the expected structure
             if selection and isinstance(selection, dict) and 'points' in selection:
                 if len(selection['points']) > 0:
                     # Get the clicked bar index
