@@ -504,7 +504,7 @@ class DataProcessor:
     
     def process_files(self, files):
         """
-        Process uploaded CSV files and return joined data with failed records
+        Process uploaded CSV files and return joined data with failed records and intermediate datasets
         """
         try:
             # Step 1: Comprehensive validation and column mapping
@@ -513,7 +513,7 @@ class DataProcessor:
             if not is_valid:
                 logger.error("Files validation failed. Returning error messages.")
                 # Return error messages instead of None to display to user
-                return None, None, error_messages, 0
+                return None, None, error_messages, 0, None, None
             
             # Step 2: Extract validated and mapped dataframes
             send_df = mapped_dataframes['send_mails']
@@ -538,7 +538,7 @@ class DataProcessor:
             send_open_successful, send_open_failed = self._join_send_open(send_df, open_df)
             
             if send_open_successful is None:
-                return None, None, ["❌ **Join Error**: Failed to join Send Mails and Open Mails data"], original_send_count
+                return None, None, ["❌ **Join Error**: Failed to join Send Mails and Open Mails data"], original_send_count, None, None
             
             # Join send-open data with contacts
             contacts_result = self._join_with_contacts(send_open_successful, contacts_df)
@@ -546,8 +546,8 @@ class DataProcessor:
             # Check if contacts join returned an error (no matches)
             if len(contacts_result) == 3:
                 # Error case: returned (None, None, error_messages)
-                error_result = contacts_result + [original_send_count]  # Add original send count to error
-                return error_result  # Pass through the error with original send count
+                error_result = contacts_result + [original_send_count, send_df, send_open_successful]  # Add intermediate datasets to error
+                return error_result  # Pass through the error with intermediate datasets
             else:
                 # Success case: returned (successful_df, failed_df)
                 contacts_successful, contacts_failed = contacts_result
@@ -591,11 +591,12 @@ class DataProcessor:
                 logger.info(f"Saved {len(final_failed_df)} failed records to {failed_path}")
             
             logger.info(f"Successfully processed files: {len(successful_df)} successful, {len(final_failed_df)} failed")
-            return successful_df, final_failed_df, [], original_send_count  # Add original send count
+            # Return: successful_df, failed_df, validation_errors, original_send_count, send_df, send_open_successful
+            return successful_df, final_failed_df, [], original_send_count, send_df, send_open_successful
             
         except Exception as e:
             logger.error(f"Error processing files: {str(e)}")
-            return None, None, [f"❌ **Processing Error**: {str(e)}"], 0  # Return 0 for original count on error
+            return None, None, [f"❌ **Processing Error**: {str(e)}"], 0, None, None  # Return None for intermediate datasets on error
     
     def _load_csv(self, file, file_type):
         """Load CSV file with error handling"""

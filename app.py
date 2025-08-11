@@ -22,8 +22,11 @@ if 'db_manager' not in st.session_state:
     st.session_state.db_manager = DatabaseManager()
 
 def main():
-    st.title("📊 CSV Analytics Dashboard")
-    st.markdown("Upload your CSV files and analyze trends across different time periods")
+    # Create a container at the top for consistent focus
+    header_container = st.container()
+    with header_container:
+        st.title("📊 CSV Analytics Dashboard")
+        st.markdown("Upload your CSV files and analyze trends across different time periods")
     
     # Sidebar for file uploads
     with st.sidebar:
@@ -60,24 +63,32 @@ def main():
                         # Process the data
                         result = st.session_state.data_processor.process_files(files)
                         
-                        if len(result) == 4:
-                            # New format: successful_data, failed_data, validation_errors, original_send_count
+                        if len(result) == 6:
+                            # New format: successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df
+                            successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = result
+                        elif len(result) == 4:
+                            # Old format: successful_data, failed_data, validation_errors, original_send_count
                             successful_data, failed_data, validation_errors, original_send_count = result
+                            send_df, send_open_df = None, None
                         elif len(result) == 3:
-                            # Old format: successful_data, failed_data, validation_errors
+                            # Older format: successful_data, failed_data, validation_errors
                             successful_data, failed_data, validation_errors = result
                             original_send_count = len(successful_data) if successful_data is not None else 0
+                            send_df, send_open_df = None, None
                         else:
                             # Backward compatibility
                             successful_data, failed_data = result
                             validation_errors = []
                             original_send_count = len(successful_data) if successful_data is not None else 0
+                            send_df, send_open_df = None, None
                         
                         if successful_data is not None:
                             # Store in session state
                             st.session_state.successful_data = successful_data
                             st.session_state.failed_data = failed_data
                             st.session_state.original_send_count = original_send_count  # Store original send count
+                            st.session_state.send_df = send_df  # Store intermediate Send dataset
+                            st.session_state.send_open_df = send_open_df  # Store intermediate Send-Open dataset
                             
                             # Show summary
                             total_processed = len(successful_data) + len(failed_data)
@@ -88,6 +99,10 @@ def main():
                                    f"- Total records: {total_processed:,}\n"
                                    f"- Successful matches: {len(successful_data):,} ({success_rate:.1f}%)\n"
                                    f"- Failed matches: {len(failed_data):,} ({100-success_rate:.1f}%)")
+                            
+                            # Set flag to scroll to top after rerun
+                            st.session_state.should_scroll_to_top = True
+                            
                             st.rerun()
                         else:
                             # Show validation errors
@@ -161,6 +176,17 @@ def show_dashboard():
     failed_data = st.session_state.failed_data
     original_send_count = st.session_state.get('original_send_count', len(successful_data))
     
+    # Scroll to top if flag is set (after file processing)
+    if st.session_state.get('should_scroll_to_top', False):
+        st.components.v1.html("""
+        <script>
+            setTimeout(function() {
+                window.scrollTo({top: 0, behavior: 'smooth'});
+            }, 100);
+        </script>
+        """, height=0)
+        st.session_state.should_scroll_to_top = False
+    
     # Add tabs for successful and failed data
     tab1, tab2 = st.tabs(["✅ Successful Matches", "❌ Failed Records"])
     
@@ -175,18 +201,29 @@ def show_successful_dashboard(data, original_send_count):
         st.warning("No successful matches found.")
         return
     
+    # Get intermediate datasets from session state
+    send_df = st.session_state.get('send_df', None)
+    send_open_df = st.session_state.get('send_open_df', None)
+    
     # Dashboard filters
     st.subheader("📊 Dashboard Filters")
     col1, col2, col3, col4 = st.columns([3, 3, 3, 3])
     
     with col1:
-        # Date range selector
+        # Date range selector - check if we have a clicked date range from chart
         min_date = data['sent_date'].min().date()
         max_date = data['sent_date'].max().date()
         
+        # Use clicked date range if available, otherwise use full range
+        if 'clicked_date_range' in st.session_state:
+            default_start, default_end = st.session_state.clicked_date_range
+            default_value = (default_start, default_end)
+        else:
+            default_value = (min_date, max_date)
+        
         date_range = st.date_input(
             "Sent Date Range",
-            value=(min_date, max_date),
+            value=default_value,
             min_value=min_date,
             max_value=max_date,
             key="date_range"
@@ -219,84 +256,160 @@ def show_successful_dashboard(data, original_send_count):
     with col4:
         # Reset filters button
         if st.button("Reset Filters", type="secondary"):
+            # Clear clicked date range from session state
+            if 'clicked_date_range' in st.session_state:
+                del st.session_state.clicked_date_range
             st.rerun()
     
-    # Apply filters
+    # Apply filters to all datasets
     filtered_data = data.copy()
+    filtered_send_df = send_df.copy() if send_df is not None else None
+    filtered_send_open_df = send_open_df.copy() if send_open_df is not None else None
     
-    # Filter by date range
+    # Filter by date range - apply to all datasets
     if len(date_range) == 2:
+        # Filter final dataset (Send x Open x Contacts)
         filtered_data = filtered_data[
             (filtered_data['sent_date'].dt.date >= date_range[0]) & 
             (filtered_data['sent_date'].dt.date <= date_range[1])
         ]
+        
+        # Filter Send dataset
+        if filtered_send_df is not None and 'sent_date' in filtered_send_df.columns:
+            filtered_send_df = filtered_send_df[
+                (filtered_send_df['sent_date'].dt.date >= date_range[0]) & 
+                (filtered_send_df['sent_date'].dt.date <= date_range[1])
+            ]
+        
+        # Filter Send-Open dataset
+        if filtered_send_open_df is not None and 'sent_date' in filtered_send_open_df.columns:
+            filtered_send_open_df = filtered_send_open_df[
+                (filtered_send_open_df['sent_date'].dt.date >= date_range[0]) & 
+                (filtered_send_open_df['sent_date'].dt.date <= date_range[1])
+            ]
     
     # Filter by Account Owner - REMOVED
     # if selected_account_owner != 'All':
     #     filtered_data = filtered_data[filtered_data['Account Owner'] == selected_account_owner]
     
-    # Show filter summary
-    st.info(f"📈 Showing {len(filtered_data):,} records (filtered from {len(data):,} total records)")
+    # Show filter summary with chart interaction info
+    filter_info = f"📈 Showing {len(filtered_data):,} records (filtered from {len(data):,} total records)"
+    if 'clicked_date_range' in st.session_state:
+        clicked_start, clicked_end = st.session_state.clicked_date_range
+        filter_info += f" | 📊 Chart filter active: {clicked_start} to {clicked_end}"
+    st.info(filter_info)
     
-    # Create dashboard sections
-    show_kpi_cards(filtered_data, original_send_count)
+    # Create dashboard sections with stage-specific datasets
+    show_kpi_cards(filtered_data, filtered_send_df, filtered_send_open_df)
     show_trend_charts(filtered_data, analysis_type, metric)
     show_engagement_table(filtered_data)
+    show_send_open_join_data(data)  # Show Send-Open join successful records
     show_data_table(filtered_data)
 
-def show_kpi_cards(data, original_send_count):
+def show_kpi_cards(final_data, send_df, send_open_df):
     st.subheader("📈 Key Performance Indicators")
     
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    # Create expandable section to show KPI data sources
+    with st.expander("ℹ️ KPI Data Sources", expanded=False):
+        st.write("**KPI calculations are based on different pipeline stages:**")
+        st.write("- **Stage 1 (Send Data)**: Total Sends, Total Prospect Count, Open Rate")  
+        st.write("- **Stage 2 (Send-Open Data)**: Opened Prospect Count, Prospect Opened")
+        st.write("- **Stage 3 (Final Data)**: Accounts Owned, Contact Match Rate, High Engagement")
+        st.write("- All KPIs are filtered by the selected date range")
+    
+    # First Row: Stage 1 (Send Data) KPIs
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        total_sends = original_send_count
-        st.metric("Total Sends", f"{total_sends:,}")
+        total_sends = len(send_df) if send_df is not None else 0
+        st.metric("Total Sends", f"{total_sends:,}", help="From filtered Send Mails data")
     
     with col2:
-        total_views = data['Views'].sum()
-        st.metric("Total Views", f"{total_views:,}")
+        # Total Prospect Count: Unique emails in Send data
+        if send_df is not None and 'Recipient Email' in send_df.columns:
+            total_prospect_count = send_df['Recipient Email'].nunique()
+            st.metric("Total Prospect Count", f"{total_prospect_count:,}", help="Unique prospects in Send Mails data")
+        else:
+            st.metric("Total Prospect Count", "N/A", help="Send data not available")
     
     with col3:
-        total_clicks = data['Clicks'].sum()
-        st.metric("Total Clicks", f"{total_clicks:,}")
+        # Open Rate: % of sends that got matched with opens (only opened emails are in open mails CSV)
+        if send_df is not None and send_open_df is not None:
+            open_rate = (len(send_open_df) / len(send_df) * 100) if len(send_df) > 0 else 0
+            st.metric("Open Rate", f"{open_rate:.1f}%", help="% of sends that were opened (matched with Open Mails CSV)")
+        else:
+            st.metric("Open Rate", "N/A", help="Send-Open data not available")
+    
+    # Second Row: Stage 2 (Send-Open Data) KPIs
+    col4, col5 = st.columns(2)
+    
+    # Commented out KPIs as requested
+    # with col4:
+    #     total_views = send_open_df['Views'].sum() if send_open_df is not None and 'Views' in send_open_df.columns else 0
+    #     st.metric("Total Views", f"{total_views:,}", help="From filtered Send-Open data")
+    # 
+    # with col5:
+    #     total_clicks = send_open_df['Clicks'].sum() if send_open_df is not None and 'Clicks' in send_open_df.columns else 0
+    #     st.metric("Total Clicks", f"{total_clicks:,}", help="From filtered Send-Open data")
+    # 
+    # with col6:
+    #     view_rate = (total_views / total_sends * 100) if total_sends > 0 else 0
+    #     st.metric("View Rate", f"{view_rate:.1f}%", help="Total Views / Total Sends")
+    # 
+    # with col7:
+    #     click_rate = (total_clicks / total_sends * 100) if total_sends > 0 else 0
+    #     st.metric("Click Rate", f"{click_rate:.1f}%", help="Total Clicks / Total Sends")
     
     with col4:
-        view_rate = (total_views / total_sends * 100) if total_sends > 0 else 0
-        st.metric("View Rate", f"{view_rate:.1f}%")
+        # Opened Prospect Count: Unique emails in Send-Open data
+        if send_open_df is not None and 'Recipient Email' in send_open_df.columns:
+            opened_prospect_count = send_open_df['Recipient Email'].nunique()
+            st.metric("Opened Prospect Count", f"{opened_prospect_count:,}", help="Unique prospects in Send-Open data")
+        else:
+            st.metric("Opened Prospect Count", "N/A", help="Send-Open data not available")
     
     with col5:
-        # Open Rate based on last_opened column
-        if 'last_opened' in data.columns:
-            # Count records with date/time format (not "Not read yet")
-            opened_records = data[data['last_opened'] != 'Not read yet'].shape[0]
-            open_rate = (opened_records / total_sends * 100) if total_sends > 0 else 0
-            st.metric("Open Rate", f"{open_rate:.1f}%")
+        # Prospect Opened: Opened Prospect Count / Total Prospect Count * 100
+        if send_open_df is not None and send_df is not None and 'Recipient Email' in send_open_df.columns and 'Recipient Email' in send_df.columns:
+            opened_prospect_count = send_open_df['Recipient Email'].nunique()
+            total_prospect_count = send_df['Recipient Email'].nunique()
+            prospect_opened_rate = (opened_prospect_count / total_prospect_count * 100) if total_prospect_count > 0 else 0
+            st.metric("Prospect Opened", f"{prospect_opened_rate:.1f}%", help="Opened Prospect Count / Total Prospect Count * 100")
         else:
-            st.metric("Open Rate", "N/A")
+            st.metric("Prospect Opened", "N/A", help="Send or Send-Open data not available")
     
-    with col6:
+    # Third Row: Stage 3 (Final Data) KPIs
+    col10, col11, col12 = st.columns(3)
+    
+    with col10:
         # Accounts Owned - unique Company URL ID count
-        if 'Company URL ID' in data.columns:
-            accounts_owned = data['Company URL ID'].nunique()
-            st.metric("Accounts Owned", f"{accounts_owned:,}")
+        if 'Company URL ID' in final_data.columns:
+            accounts_owned = final_data['Company URL ID'].nunique()
+            st.metric("Accounts Owned", f"{accounts_owned:,}", help="From final filtered data (with contacts)")
         else:
-            st.metric("Accounts Owned", "N/A")
+            st.metric("Accounts Owned", "N/A", help="Company URL data not available")
     
-    # with col7:
-    #     # Total Opportunity Amount - filtered by Latest edit date and account owner
-    #     total_opportunity_amount = calculate_filtered_opportunity_amount(data)
-    #     st.metric("Total Opp. Amount", f"${total_opportunity_amount:,.0f}")
-    # 
-    # with col8:
-    #     # Time to Opportunity - average days from Latest edit date to Created Date
-    #     avg_time_to_opportunity = calculate_time_to_opportunity(data)
-    #     st.metric("Time to Opp.", f"{avg_time_to_opportunity:.1f} days")
+    with col11:
+        # Contact Match Rate: % of send-open records that matched with contacts
+        if send_open_df is not None:
+            contact_match_rate = (len(final_data) / len(send_open_df) * 100) if len(send_open_df) > 0 else 0
+            st.metric("Contact Match", f"{contact_match_rate:.1f}%", help="% of Send-Open records matched with contacts")
+        else:
+            st.metric("Contact Match", "N/A", help="Send-Open data not available")
     
-    with col7:
-        # High Engagement Accounts Count - companies with views > 2x emails sent
-        high_engagement_count = calculate_high_engagement_accounts(data)
-        st.metric("High Engagement", f"{high_engagement_count:,}")
+    with col12:
+        # High Engagement Accounts Count - companies with views > 2x emails sent (from Stage 3: Final Data)
+        high_engagement_count = calculate_high_engagement_accounts(final_data)
+        st.metric("High Engagement", f"{high_engagement_count:,}", help="Companies with Views > 2× Emails sent (from Stage 3: Final Data)")
+    
+    # Commented out Pipeline Success KPI as requested
+    # with col13:
+    #     # Overall Pipeline Success Rate: Final records / Original sends (from Stage 3: Final Data)
+    #     if send_df is not None:
+    #         overall_success_rate = (len(final_data) / len(send_df) * 100) if len(send_df) > 0 else 0
+    #         st.metric("Pipeline Success", f"{overall_success_rate:.1f}%", help="% of sends that completed full pipeline (from Stage 3: Final Data)")
+    #     else:
+    #         st.metric("Pipeline Success", "N/A", help="Send data not available")
 
 # def calculate_filtered_opportunity_amount(data):
 #     """
@@ -465,13 +578,15 @@ def calculate_high_engagement_accounts(data):
     return len(high_engagement_companies)
 
 def show_trend_charts(data, analysis_type, metric):
-    st.subheader(f"📊 {analysis_type} Analysis")
+    st.markdown(f"<h3 id='csv-analytics-dashboard'>📊 {analysis_type} Analysis</h3>", unsafe_allow_html=True)
     
     # Group data by time period
     if analysis_type == "Week-on-Week":
         data['period'] = data['sent_date'].dt.to_period('W')
+        period_format = 'W'
     else:
         data['period'] = data['sent_date'].dt.to_period('M')
+        period_format = 'M'
     
     # Aggregate data
     trend_data = data.groupby('period').agg({
@@ -481,24 +596,60 @@ def show_trend_charts(data, analysis_type, metric):
     }).reset_index()
     
     trend_data.columns = ['period', 'Views', 'Clicks', 'total_sends']
-    trend_data['period'] = trend_data['period'].astype(str)
     
-    # Create trend chart
-    fig = px.line(
+    # Convert period to string for display, but keep original for date calculations
+    trend_data['period_str'] = trend_data['period'].astype(str)
+    trend_data['period_start'] = trend_data['period'].dt.start_time.dt.date
+    trend_data['period_end'] = trend_data['period'].dt.end_time.dt.date
+    
+    # Create interactive bar chart
+    fig = px.bar(
         trend_data,
-        x='period',
+        x='period_str',
         y=metric,
-        title=f"{metric.replace('_', ' ').title()} Over Time",
-        markers=True
+        title=f"{metric.replace('_', ' ').title()} Over Time (Click bars to filter)",
+        hover_data={'period_start': True, 'period_end': True},
+        color=metric,
+        color_continuous_scale="Blues"
     )
     
     fig.update_layout(
         xaxis_title="Time Period",
         yaxis_title=metric.replace('_', ' ').title(),
-        height=400
+        height=400,
+        showlegend=False
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    # Display the chart and capture click events
+    selected_data = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+    
+    # Handle bar click events to update date range filter
+    if selected_data and hasattr(selected_data, 'selection') and selected_data.selection:
+        if 'points' in selected_data.selection and len(selected_data.selection['points']) > 0:
+            # Get the clicked bar index
+            clicked_point = selected_data.selection['points'][0]
+            if 'point_index' in clicked_point:
+                point_index = clicked_point['point_index']
+                
+                # Get the date range for the clicked period
+                clicked_period_start = trend_data.iloc[point_index]['period_start']
+                clicked_period_end = trend_data.iloc[point_index]['period_end']
+                
+                # Update session state with the new date range
+                st.session_state.clicked_date_range = (clicked_period_start, clicked_period_end)
+                
+                # Show selected period info
+                st.info(f"📅 Selected Period: {clicked_period_start} to {clicked_period_end}")
+                st.info("💡 The date range filter above has been updated! The page will refresh automatically to show filtered data.")
+                
+                # Trigger a rerun to apply the new filter
+                st.rerun()
+    
+    # Check if we need to apply a clicked date range
+    if 'clicked_date_range' in st.session_state:
+        clicked_start, clicked_end = st.session_state.clicked_date_range
+        st.warning(f"🎯 Currently showing data for period: {clicked_start} to {clicked_end}")
+        st.write("To clear this filter, use the Reset Filters button above.")
 
 def show_engagement_table(data):
     st.subheader("🔥 Company Engagement Analysis")
@@ -582,6 +733,67 @@ def show_engagement_table(data):
                 st.info(f"📧 **{total_individual_emails}** emails sent • **{total_individual_views}** total views • **{total_individual_clicks}** total clicks")
             else:
                 st.warning("No recipient data available for this company.")
+
+def show_send_open_join_data(data):
+    st.subheader("📊 Send-Open Join Successful Records")
+    
+    # Calculate Send-Open join stats
+    send_open_count = len(data)  # This represents all successful Send-Open joins (both successful and failed contacts)
+    
+    # Get failed contact records to calculate total Send-Open successful
+    failed_data = st.session_state.get('failed_data', pd.DataFrame())
+    contact_failures = failed_data[failed_data['failure_reason'] == 'Send email not found in contacts'] if 'failure_reason' in failed_data.columns else pd.DataFrame()
+    
+    total_send_open_successful = send_open_count + len(contact_failures)
+    
+    st.info(f"📈 **{total_send_open_successful:,}** records successfully joined Send Mails ↔ Open Mails data")
+    st.write("This shows the intermediate table created after Send-Open join, before Contacts join:")
+    
+    # Combine successful final data + contact failures to show complete Send-Open successful data
+    if len(contact_failures) > 0:
+        # Combine final successful data with contact failures to show complete Send-Open join results
+        all_send_open_data = pd.concat([data, contact_failures], ignore_index=True)
+    else:
+        all_send_open_data = data
+    
+    with st.expander("📋 View Send-Open Joined Data", expanded=False):
+        # Show the complete Send-Open joined data
+        st.dataframe(
+            all_send_open_data.head(100),
+            use_container_width=True,
+            height=400
+        )
+        
+        # Show summary metrics
+        if 'Views' in all_send_open_data.columns and 'Clicks' in all_send_open_data.columns:
+            total_views = all_send_open_data['Views'].sum()
+            total_clicks = all_send_open_data['Clicks'].sum()
+            avg_views = all_send_open_data['Views'].mean()
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Send-Open Records", f"{len(all_send_open_data):,}")
+            with col2:
+                st.metric("Total Views", f"{total_views:,}")
+            with col3:
+                st.metric("Total Clicks", f"{total_clicks:,}")
+            with col4:
+                st.metric("Avg Views/Record", f"{avg_views:.1f}")
+        
+        # Show column structure
+        st.write("**Columns in Send-Open Joined Table:**")
+        columns_display = ', '.join([f"`{col}`" for col in all_send_open_data.columns.tolist()])
+        st.write(columns_display)
+        
+        # Download button
+        send_open_csv = all_send_open_data.to_csv(index=False)
+        st.download_button(
+            label="📊 Download Complete Send-Open Joined Data",
+            data=send_open_csv,
+            file_name=f"send_open_joined_complete_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            key="complete_send_open_data"
+        )
 
 def show_data_table(data):
     st.subheader("📋 Data Table")
@@ -675,7 +887,6 @@ def show_failed_records(failed_data):
                     mime="text/csv",
                     key="send_open_failures"
                 )
-        
         # Show Contacts Join Failures
         if len(contact_failures) > 0:
             st.subheader("👤 Contacts Join Failures")
