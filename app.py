@@ -65,7 +65,7 @@ def show_email_dashboard():
             st.info("Demo files include sample Send Mails, Open Mails, and Contacts data")
             
             # Demo file processing button
-            if st.button("Load Demo Data", type="primary", key="load_demo_email"):
+            if st.button("Load Send-Open Data", type="primary", key="load_demo_email"):
                 load_demo_data_email()
             
         else:  # Upload My Files
@@ -182,7 +182,7 @@ def show_calls_dashboard():
             st.info("Demo file includes sample call records with various dispositions")
             
             # Demo file processing button
-            if st.button("Load Demo Data", type="primary", key="load_demo_calls"):
+            if st.button("Load Calls Data", type="primary", key="load_demo_calls"):
                 load_demo_data_calls()
                 
         else:  # Upload My Files
@@ -1711,7 +1711,7 @@ def show_combined_dashboard():
             st.info("Demo includes Send, Open, Calls, and Contacts data")
             
             # Demo file processing button
-            if st.button("Load Demo Data", type="primary", key="load_demo_combined"):
+            if st.button("Load Combined Data", type="primary", key="load_demo_combined"):
                 load_demo_data_combined()
                 
         else:  # Use data from other tabs
@@ -1946,9 +1946,18 @@ def show_combined_engagement_table(data):
         # Get company data to calculate call metrics
         company_data = data[data['Company URL'] == company_url].copy()
         
-        # Calculate call metrics for this company (using new aggregated columns)
-        total_calls = company_data['Total_Calls'].sum() if 'Total_Calls' in company_data.columns else 0
-        connected_calls = company_data['Connected_Calls'].sum() if 'Connected_Calls' in company_data.columns else 0
+        # Calculate call metrics for this company - COUNT UNIQUE CALLS, NOT SUM AGGREGATED COLUMNS
+        if 'Total_Calls' in company_data.columns:
+            # Get unique email addresses in this company and sum their call counts (avoid double counting)
+            unique_email_calls = company_data.groupby('Recipient Email').agg({
+                'Total_Calls': 'first',        # Take first value (all rows for same email have same Total_Calls)
+                'Connected_Calls': 'first'     # Take first value (all rows for same email have same Connected_Calls)  
+            })
+            total_calls = unique_email_calls['Total_Calls'].sum()
+            connected_calls = unique_email_calls['Connected_Calls'].sum()
+        else:
+            total_calls = 0
+            connected_calls = 0
         
         # Create expandable section for each company - ENHANCED header
         engagement_indicator = "🔥 HIGH" if is_high_engagement else "📊 Normal"
@@ -1998,8 +2007,17 @@ def show_combined_engagement_table(data):
                 total_individual_emails = len(individual_emails)
                 total_individual_views = individual_emails['Views'].sum()
                 total_individual_clicks = individual_emails['Clicks'].sum()
-                total_individual_calls = individual_emails['Total_Calls'].sum() if 'Total_Calls' in individual_emails.columns else 0
-                total_connected_calls = individual_emails['Connected_Calls'].sum() if 'Connected_Calls' in individual_emails.columns else 0
+                # Calculate unique call counts to avoid double counting
+                if 'Total_Calls' in individual_emails.columns:
+                    unique_calls_summary = individual_emails.groupby('Recipient Email').agg({
+                        'Total_Calls': 'first',
+                        'Connected_Calls': 'first'
+                    })
+                    total_individual_calls = unique_calls_summary['Total_Calls'].sum()
+                    total_connected_calls = unique_calls_summary['Connected_Calls'].sum()
+                else:
+                    total_individual_calls = 0
+                    total_connected_calls = 0
                 
                 st.info(f"📧 **{total_individual_emails}** emails • **{total_individual_views}** views • **{total_individual_clicks}** clicks • **{total_individual_calls}** calls • **{total_connected_calls}** connected")
             else:
