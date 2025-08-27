@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import os
 from src.data_processor import DataProcessor
 from src.database import DatabaseManager
+from src.calls_processor import CallsProcessor
+from src.combined_processor import CombinedProcessor
 
 # Configure page
 st.set_page_config(
@@ -20,109 +22,721 @@ if 'data_processor' not in st.session_state:
     st.session_state.data_processor = DataProcessor()
 if 'db_manager' not in st.session_state:
     st.session_state.db_manager = DatabaseManager()
+if 'calls_processor' not in st.session_state:
+    st.session_state.calls_processor = CallsProcessor()
+if 'combined_processor' not in st.session_state:
+    st.session_state.combined_processor = CombinedProcessor()
 
 def main():
     # Create a container at the top for consistent focus
     header_container = st.container()
     with header_container:
-        st.title("📊 CSV Analytics Dashboard")
-        st.markdown("Upload your CSV files and analyze trends across different time periods")
+        st.title("📊 Communication Analytics Dashboard")
+        st.markdown("Upload your CSV files and analyze email and call trends across different time periods")
     
-    # Sidebar for file uploads
+    # Create main navigation tabs
+    email_tab, calls_tab, combined_tab = st.tabs(["📧 Email Analytics", "📞 Calls Analytics", "📊 Combined Analytics"])
+    
+    with email_tab:
+        show_email_dashboard()
+    
+    with calls_tab:
+        show_calls_dashboard()
+    
+    with combined_tab:
+        show_combined_dashboard()
+
+def show_email_dashboard():
+    """Handle the complete email analytics dashboard - unchanged from original"""
+    # Sidebar for demo/upload choice and file uploads
     with st.sidebar:
-        st.header("📁 File Upload")
+        st.header("🎛️ Data Source")
         
-        # File uploaders
-        send_file = st.file_uploader("Upload Send Mails CSV", type=['csv'], key='send_mails')
-        open_file = st.file_uploader("Upload Open Mails CSV", type=['csv'], key='open_mails')
-        # account_history_file = st.file_uploader("Upload Account History CSV", type=['csv'], key='account_history')
+        # Demo vs Upload choice
+        data_source = st.radio(
+            "Choose data source:",
+            ["📂 Use Demo Files", "📤 Upload My Files"],
+            index=0,  # Default to demo files
+            key="email_data_source"
+        )
         
-        # Contacts file info
-        st.info("📋 **Contacts CSV**: Using internal contacts database from `data/contacts.csv`")
-        # opportunity_details_file = st.file_uploader("Upload Opportunity Details CSV", type=['csv'], key='opportunity_details')
-        # contact_file = st.file_uploader("Upload Contact CSV (Optional)", type=['csv'], key='contact')
-        # account_file = st.file_uploader("Upload Account CSV (Optional)", type=['csv'], key='account')
-        
-        # Process files button
-        if st.button("Process Files", type="primary"):
-            if send_file and open_file:
-                # Commented out: and opportunity_details_file
-                with st.spinner("Processing files..."):
-                    try:
-                        # Save uploaded files
-                        files = {
-                            'send_mails': send_file,
-                            'open_mails': open_file,
-                            'contacts': 'data/contacts.csv'  # Internal contacts file
-                            # 'account_history': account_history_file,
-                            # 'opportunity_details': opportunity_details_file,
-                            # 'contact': contact_file,
-                            # 'account': account_file
-                        }
-                        
-                        # Process the data
-                        result = st.session_state.data_processor.process_files(files)
-                        
-                        if len(result) == 6:
-                            # New format: successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df
-                            successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = result
-                        elif len(result) == 4:
-                            # Old format: successful_data, failed_data, validation_errors, original_send_count
-                            successful_data, failed_data, validation_errors, original_send_count = result
-                            send_df, send_open_df = None, None
-                        elif len(result) == 3:
-                            # Older format: successful_data, failed_data, validation_errors
-                            successful_data, failed_data, validation_errors = result
-                            original_send_count = len(successful_data) if successful_data is not None else 0
-                            send_df, send_open_df = None, None
-                        else:
-                            # Backward compatibility
-                            successful_data, failed_data = result
-                            validation_errors = []
-                            original_send_count = len(successful_data) if successful_data is not None else 0
-                            send_df, send_open_df = None, None
-                        
-                        if successful_data is not None:
-                            # Store in session state
-                            st.session_state.successful_data = successful_data
-                            st.session_state.failed_data = failed_data
-                            st.session_state.original_send_count = original_send_count  # Store original send count
-                            st.session_state.send_df = send_df  # Store intermediate Send dataset
-                            st.session_state.send_open_df = send_open_df  # Store intermediate Send-Open dataset
+        if data_source == "📂 Use Demo Files":
+            st.success("✅ Using pre-loaded demo files")
+            st.info("Demo files include sample Send Mails, Open Mails, and Contacts data")
+            
+            # Demo file processing button
+            if st.button("Load Demo Data", type="primary", key="load_demo_email"):
+                load_demo_data_email()
+            
+        else:  # Upload My Files
+            st.header("📁 File Upload")
+            
+            # File uploaders
+            send_file = st.file_uploader("Upload Send Mails CSV", type=['csv'], key='send_mails')
+            open_file = st.file_uploader("Upload Open Mails CSV", type=['csv'], key='open_mails')
+            # account_history_file = st.file_uploader("Upload Account History CSV", type=['csv'], key='account_history')
+            
+            # Contacts file info
+            st.info("📋 **Contacts CSV**: Using internal contacts database from `data/contacts.csv`")
+            # opportunity_details_file = st.file_uploader("Upload Opportunity Details CSV", type=['csv'], key='opportunity_details')
+            # contact_file = st.file_uploader("Upload Contact CSV (Optional)", type=['csv'], key='contact')
+            # account_file = st.file_uploader("Upload Account CSV (Optional)", type=['csv'], key='account')
+            
+            # Process files button
+            if st.button("Process Files", type="primary"):
+                if send_file and open_file:
+                    # Commented out: and opportunity_details_file
+                    with st.spinner("Processing files..."):
+                        try:
+                            # Save uploaded files
+                            files = {
+                                'send_mails': send_file,
+                                'open_mails': open_file,
+                                'contacts': 'data/contacts.csv'  # Internal contacts file
+                                # 'account_history': account_history_file,
+                                # 'opportunity_details': opportunity_details_file,
+                                # 'contact': contact_file,
+                                # 'account': account_file
+                            }
                             
-                            # Show summary
-                            total_processed = len(successful_data) + len(failed_data)
-                            success_rate = len(successful_data) / total_processed * 100 if total_processed > 0 else 0
+                            # Process the data
+                            result = st.session_state.data_processor.process_files(files)
                             
-                            st.success(f"Files processed successfully!")
-                            st.info(f"📊 **Processing Summary:**\n"
-                                   f"- Total records: {total_processed:,}\n"
-                                   f"- Successful matches: {len(successful_data):,} ({success_rate:.1f}%)\n"
-                                   f"- Failed matches: {len(failed_data):,} ({100-success_rate:.1f}%)")
-                            
-                            # Set flag to scroll to top after rerun
-                            st.session_state.should_scroll_to_top = True
-                            
-                            st.rerun()
-                        else:
-                            # Show validation errors
-                            if validation_errors:
-                                st.error("**File Validation Failed**")
-                                for error in validation_errors:
-                                    st.error(error)
+                            if len(result) == 6:
+                                # New format: successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df
+                                successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = result
+                            elif len(result) == 4:
+                                # Old format: successful_data, failed_data, validation_errors, original_send_count
+                                successful_data, failed_data, validation_errors, original_send_count = result
+                                send_df, send_open_df = None, None
+                            elif len(result) == 3:
+                                # Older format: successful_data, failed_data, validation_errors
+                                successful_data, failed_data, validation_errors = result
+                                original_send_count = len(successful_data) if successful_data is not None else 0
+                                send_df, send_open_df = None, None
                             else:
-                                st.error("Error processing files")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-            else:
-                st.warning("Please upload Send Mails and Open Mails CSV files")
-                # Commented out: and Account History and Opportunity Details
+                                # Backward compatibility
+                                successful_data, failed_data = result
+                                validation_errors = []
+                                original_send_count = len(successful_data) if successful_data is not None else 0
+                                send_df, send_open_df = None, None
+                            
+                            if successful_data is not None:
+                                # Store in session state
+                                st.session_state.successful_data = successful_data
+                                st.session_state.failed_data = failed_data
+                                st.session_state.original_send_count = original_send_count  # Store original send count
+                                st.session_state.send_df = send_df  # Store intermediate Send dataset
+                                st.session_state.send_open_df = send_open_df  # Store intermediate Send-Open dataset
+                                
+                                # Show summary
+                                total_processed = len(successful_data) + len(failed_data)
+                                success_rate = len(successful_data) / total_processed * 100 if total_processed > 0 else 0
+                                
+                                st.success(f"Files processed successfully!")
+                                st.info(f"📊 **Processing Summary:**\n"
+                                       f"- Total records: {total_processed:,}\n"
+                                       f"- Successful matches: {len(successful_data):,} ({success_rate:.1f}%)\n"
+                                       f"- Failed matches: {len(failed_data):,} ({100-success_rate:.1f}%)")
+                                
+                                # Set flag to scroll to top after rerun
+                                st.session_state.should_scroll_to_top = True
+                                
+                                st.rerun()
+                            else:
+                                # Show validation errors
+                                if validation_errors:
+                                    st.error("**File Validation Failed**")
+                                    for error in validation_errors:
+                                        st.error(error)
+                                else:
+                                    st.error("Error processing files")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                else:
+                    st.warning("Please upload Send Mails and Open Mails CSV files")
+                    # Commented out: and Account History and Opportunity Details
     
-    # Main dashboard
+    # Main email dashboard
     if 'successful_data' in st.session_state:
         show_dashboard()
     else:
         show_welcome_message()
+
+def show_calls_dashboard():
+    """Handle the simple calls analytics dashboard"""
+    # Sidebar for demo/upload choice and calls file upload
+    with st.sidebar:
+        st.header("🎛️ Data Source")
+        
+        # Demo vs Upload choice
+        data_source = st.radio(
+            "Choose data source:",
+            ["📂 Use Demo Files", "📤 Upload My Files"],
+            index=0,  # Default to demo files
+            key="calls_data_source"
+        )
+        
+        if data_source == "📂 Use Demo Files":
+            st.success("✅ Using pre-loaded demo calls data")
+            st.info("Demo file includes sample call records with various dispositions")
+            
+            # Demo file processing button
+            if st.button("Load Demo Data", type="primary", key="load_demo_calls"):
+                load_demo_data_calls()
+                
+        else:  # Upload My Files
+            st.header("📞 Calls File Upload")
+            
+            # Single calls file uploader
+            calls_file = st.file_uploader("Upload Calls Record CSV", type=['csv'], key='calls_record')
+            
+            # Process calls file button
+            if st.button("Process Calls File", type="primary", key="process_calls_file"):
+                if calls_file:
+                    with st.spinner("Processing calls file..."):
+                        try:
+                            # Process the calls data
+                            is_valid, error_messages, calls_data = st.session_state.calls_processor.process_calls_file(calls_file)
+                            
+                            if is_valid:
+                                # Store in session state (separate from email data)
+                                st.session_state.calls_data = calls_data
+                                
+                                st.success(f"Calls file processed successfully!")
+                                st.info(f"📞 **Processing Summary:**\n"
+                                       f"- Total call records: {len(calls_data):,}\n"
+                                       f"- Required columns: ✅ All present")
+                                
+                                st.rerun()
+                            else:
+                                # Show validation errors
+                                st.error("**Calls File Validation Failed**")
+                                for error in error_messages:
+                                    st.error(error)
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                else:
+                    st.warning("Please upload a Calls Record CSV file")
+    
+    # Main calls dashboard content
+    if 'calls_data' in st.session_state:
+        show_calls_analytics()
+    else:
+        show_calls_welcome_message()
+
+def show_calls_welcome_message():
+    """Welcome message for calls section"""
+    st.info("👆 Upload your Calls Record CSV file using the sidebar to get started")
+    
+    # Show expected calls file format
+    with st.expander("📋 Expected Calls CSV File Format"):
+        st.subheader("Calls Record CSV")
+        st.markdown("**Required columns:**")
+        st.code("""
+Assigned,Call Disposition,Date,Company / Account,Contact,Call Duration (seconds)
+John Smith,Interested,2025-07-02 14:30:00,Acme Corp,jane@acme.com,180
+Jane Doe,Not Interested,2025-07-02 15:15:00,Tech Solutions,bob@tech.com,120
+        """)
+        
+        st.markdown("**Column Descriptions:**")
+        st.write("- **Assigned**: Person assigned to make the call")
+        st.write("- **Call Disposition**: Result/outcome of the call")
+        st.write("- **Date**: Date and time of the call")
+        st.write("- **Company / Account**: Company name or account")
+        st.write("- **Contact**: Contact person (usually email)")
+        st.write("- **Call Duration (seconds)**: Duration in seconds")
+
+def show_calls_analytics():
+    """Show simplified calls analytics dashboard with hierarchical filtering"""
+    calls_data = st.session_state.calls_data
+    
+    st.subheader("📞 Calls Analytics Dashboard")
+    
+    # File Summary Row (before filters - shows complete uploaded file stats)
+    show_file_summary(calls_data)
+    
+    # Hierarchical Filtering System
+    st.subheader("📊 Filters")
+    
+    # Step 1: Assigned Filter
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        assigned_list = ['All'] + sorted(calls_data['Assigned'].dropna().unique().tolist())
+        selected_assigned = st.selectbox(
+            "👤 Assigned",
+            assigned_list,
+            key="assigned_filter"
+        )
+    
+    # Filter by Assigned first
+    if selected_assigned != 'All':
+        filtered_data_step1 = calls_data[calls_data['Assigned'] == selected_assigned]
+    else:
+        filtered_data_step1 = calls_data.copy()
+    
+    with col2:
+        # Step 2: Date Range Filter (on assigned-filtered data)
+        if len(filtered_data_step1) > 0 and 'Date' in filtered_data_step1.columns:
+            min_date = filtered_data_step1['Date'].min().date()
+            max_date = filtered_data_step1['Date'].max().date()
+            
+            date_range = st.date_input(
+                "📅 Date Range",
+                value=(min_date, max_date),
+                min_value=min_date,
+                max_value=max_date,
+                key="calls_date_filter"
+            )
+        else:
+            date_range = None
+    
+    # Apply date filter
+    if date_range and len(date_range) == 2:
+        filtered_data_step2 = filtered_data_step1[
+            (filtered_data_step1['Date'].dt.date >= date_range[0]) & 
+            (filtered_data_step1['Date'].dt.date <= date_range[1])
+        ]
+    else:
+        filtered_data_step2 = filtered_data_step1.copy()
+    
+    # Step 3: Call Disposition and Company Filters (on date-filtered data)
+    col3, col4 = st.columns(2)
+    
+    with col3:
+        if len(filtered_data_step2) > 0:
+            dispositions = ['All'] + sorted(filtered_data_step2['Call Disposition'].dropna().unique().tolist())
+            selected_disposition = st.selectbox(
+                "📞 Call Disposition",
+                dispositions,
+                key="disposition_filter"
+            )
+        else:
+            selected_disposition = 'All'
+    
+    with col4:
+        if len(filtered_data_step2) > 0:
+            companies = ['All'] + sorted(filtered_data_step2['Company / Account'].dropna().unique().tolist())
+            selected_company = st.selectbox(
+                "🏢 Company / Account",
+                companies,
+                key="company_filter"
+            )
+        else:
+            selected_company = 'All'
+    
+    # Apply final filters
+    filtered_data_final = filtered_data_step2.copy()
+    
+    if selected_disposition != 'All':
+        filtered_data_final = filtered_data_final[filtered_data_final['Call Disposition'] == selected_disposition]
+    
+    if selected_company != 'All':
+        filtered_data_final = filtered_data_final[filtered_data_final['Company / Account'] == selected_company]
+    
+    # Show filter summary
+    st.info(f"📞 Showing {len(filtered_data_final):,} call records (filtered from {len(calls_data):,} total)")
+    
+    # Show KPIs only - no individual records
+    show_simple_calls_kpis(filtered_data_final)
+    
+    # Show filtered call records table
+    show_calls_data_table(filtered_data_final)
+
+def show_file_summary(data):
+    """Display file-level summary statistics (no filters applied)"""
+    st.subheader("📋 File Summary")
+    
+    # Create 3 columns for the summary metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_records = len(data)
+        st.metric(
+            "Total Records", 
+            f"{total_records:,}", 
+            help="Total number of call records in the uploaded file"
+        )
+    
+    with col2:
+        unique_companies = data['Company / Account'].nunique() if 'Company / Account' in data.columns else 0
+        st.metric(
+            "Unique Companies", 
+            f"{unique_companies:,}", 
+            help="Number of unique companies/accounts in the file"
+        )
+    
+    with col3:
+        # Calculate connect rate (records with "Connected" disposition)
+        if 'Call Disposition' in data.columns:
+            connected_records = len(data[data['Call Disposition'].str.strip().str.lower() == 'connected'])
+            connect_rate = (connected_records / total_records * 100) if total_records > 0 else 0
+            st.metric(
+                "Connect Rate", 
+                f"{connect_rate:.1f}%", 
+                delta=f"{connected_records} connected",
+                help="Percentage of calls with 'Connected' disposition"
+            )
+        else:
+            st.metric(
+                "Connect Rate", 
+                "N/A", 
+                help="Call Disposition column not available"
+            )
+    
+    # Add a separator line
+    st.divider()
+
+def show_simple_calls_kpis(data):
+    """Display simple calls KPI cards - numbers only, no individual records"""
+    st.subheader("📈 Call Metrics")
+    
+    if len(data) == 0:
+        st.warning("No data available for the selected filters")
+        return
+    
+    # Create KPI columns
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_calls = len(data)
+        st.metric("Total Calls", f"{total_calls:,}", help="Total number of calls in filtered data")
+    
+    with col2:
+        unique_companies = data['Company / Account'].nunique() if 'Company / Account' in data.columns else 0
+        st.metric("Unique Companies", f"{unique_companies:,}", help="Number of unique companies called")
+    
+    with col3:
+        # Connect Rate for filtered data
+        if 'Call Disposition' in data.columns and len(data) > 0:
+            connected_records = len(data[data['Call Disposition'].str.strip().str.lower() == 'connected'])
+            connect_rate = (connected_records / len(data) * 100) if len(data) > 0 else 0
+            st.metric(
+                "Connect Rate", 
+                f"{connect_rate:.1f}%", 
+                delta=f"{connected_records} connected",
+                help="Percentage of filtered calls with 'Connected' disposition"
+            )
+        else:
+            st.metric("Connect Rate", "N/A", help="Call Disposition data not available")
+    
+    with col4:
+        if 'Call Duration (seconds)' in data.columns:
+            total_duration = data['Call Duration (seconds)'].sum()
+            total_hours = total_duration / 3600
+            st.metric("Total Duration", f"{total_hours:.1f} hrs", help="Total time spent on calls")
+        else:
+            st.metric("Total Duration", "N/A", help="Duration data not available")
+    
+    # Second row of KPIs
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        unique_contacts = data['Contact'].nunique() if 'Contact' in data.columns else 0
+        st.metric("Unique Contacts", f"{unique_contacts:,}", help="Number of unique contacts called")
+    
+    with col6:
+        # Most common disposition
+        if 'Call Disposition' in data.columns and len(data) > 0:
+            top_disposition = data['Call Disposition'].mode().iloc[0] if len(data['Call Disposition'].mode()) > 0 else "N/A"
+            disposition_count = len(data[data['Call Disposition'] == top_disposition]) if top_disposition != "N/A" else 0
+            st.metric("Top Disposition", f"{top_disposition}", delta=f"{disposition_count} calls", help="Most common call disposition")
+        else:
+            st.metric("Top Disposition", "N/A", help="Disposition data not available")
+    
+    with col7:
+        # Disposition distribution
+        if 'Call Disposition' in data.columns and len(data) > 0:
+            unique_dispositions = data['Call Disposition'].nunique()
+            st.metric("Disposition Types", f"{unique_dispositions:,}", help="Number of different dispositions")
+        else:
+            st.metric("Disposition Types", "N/A", help="Disposition data not available")
+    
+    with col8:
+        # Daily average (if date range is selected)
+        if 'Date' in data.columns and len(data) > 0:
+            date_range = data['Date'].max() - data['Date'].min()
+            days = max(date_range.days, 1)  # At least 1 day
+            daily_avg = len(data) / days
+            st.metric("Daily Avg", f"{daily_avg:.1f}", help="Average calls per day in the selected period")
+        else:
+            st.metric("Daily Avg", "N/A", help="Date data not available")
+
+def show_calls_data_table(data):
+    """Display filtered call records table with all columns"""
+    st.subheader("📋 Filtered Call Records")
+    
+    if len(data) == 0:
+        st.warning("No call records match the selected filters")
+        return
+    
+    # Sort options
+    col1, col2, col3 = st.columns([2, 2, 4])
+    
+    with col1:
+        # Sort column selector
+        sort_columns = ['Date', 'Assigned', 'Call Disposition', 'Company / Account', 'Call Duration (seconds)']
+        available_sort_columns = [col for col in sort_columns if col in data.columns]
+        
+        sort_column = st.selectbox(
+            "Sort by:",
+            available_sort_columns,
+            key="calls_table_sort"
+        )
+    
+    with col2:
+        # Sort order
+        sort_ascending = st.selectbox(
+            "Order:",
+            ["Descending", "Ascending"],
+            key="calls_table_order"
+        ) == "Ascending"
+    
+    # Apply sorting
+    if sort_column and sort_column in data.columns:
+        data_sorted = data.sort_values(sort_column, ascending=sort_ascending)
+    else:
+        data_sorted = data.copy()
+    
+    # Display the table with all columns
+    st.dataframe(
+        data_sorted,
+        use_container_width=True,
+        height=400
+    )
+    
+    # Show record count
+    st.caption(f"Showing {len(data_sorted):,} call records")
+    
+    # Download button
+    csv = data_sorted.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Filtered Call Records",
+        data=csv,
+        file_name=f"filtered_call_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key="download_calls"
+    )
+
+
+def load_demo_data_email():
+    """Load demo data for Email Analytics tab"""
+    import os
+    
+    try:
+        # Define demo file paths
+        demo_files = {
+            'send_mails': 'data/send_data.csv',
+            'open_mails': 'data/open_data.csv', 
+            'contacts': 'data/contacts.csv'
+        }
+        
+        # Check if demo files exist
+        missing_files = []
+        for file_key, file_path in demo_files.items():
+            if not os.path.exists(file_path):
+                missing_files.append(file_path)
+        
+        if missing_files:
+            st.error(f"❌ Demo files not found: {', '.join(missing_files)}")
+            return
+            
+        with st.spinner("Loading demo data..."):
+            # Process demo files through the same pipeline as uploaded files
+            result = st.session_state.data_processor.process_files(demo_files)
+            
+            if len(result) == 6:
+                successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = result
+            elif len(result) == 4:
+                successful_data, failed_data, validation_errors, original_send_count = result
+                send_df, send_open_df = None, None
+            elif len(result) == 3:
+                successful_data, failed_data, validation_errors = result
+                original_send_count = len(successful_data) if successful_data is not None else 0
+                send_df, send_open_df = None, None
+            else:
+                successful_data, failed_data = result
+                validation_errors = []
+                original_send_count = len(successful_data) if successful_data is not None else 0
+                send_df, send_open_df = None, None
+            
+            if successful_data is not None:
+                # Store in session state (same as uploaded files)
+                st.session_state.successful_data = successful_data
+                st.session_state.failed_data = failed_data
+                st.session_state.original_send_count = original_send_count
+                st.session_state.send_df = send_df
+                st.session_state.send_open_df = send_open_df
+                
+                # Show success message
+                total_processed = len(successful_data) + len(failed_data)
+                success_rate = len(successful_data) / total_processed * 100 if total_processed > 0 else 0
+                
+                st.success(f"✅ Demo data loaded successfully!")
+                st.info(f"📊 **{len(successful_data):,}** successful records ({success_rate:.1f}% success rate)")
+                
+                if validation_errors:
+                    with st.expander("⚠️ Validation Issues", expanded=False):
+                        for error in validation_errors:
+                            st.warning(error)
+            else:
+                st.error("❌ Failed to process demo data")
+                if validation_errors:
+                    for error in validation_errors:
+                        st.error(error)
+                        
+    except Exception as e:
+        st.error(f"❌ Error loading demo data: {str(e)}")
+
+def load_demo_data_calls():
+    """Load demo data for Calls Analytics tab"""
+    import os
+    
+    try:
+        # Define demo file path
+        demo_file_path = 'data/calls_data.csv'
+        
+        # Check if demo file exists
+        if not os.path.exists(demo_file_path):
+            st.error(f"❌ Demo calls file not found: {demo_file_path}")
+            return
+            
+        with st.spinner("Loading demo calls data..."):
+            # Open demo file and process through the same pipeline as uploaded files
+            with open(demo_file_path, 'rb') as demo_file:
+                is_valid, error_messages, calls_data = st.session_state.calls_processor.process_calls_file(demo_file)
+                
+            if is_valid:
+                # Store in session state (same as uploaded files)
+                st.session_state.calls_data = calls_data
+                
+                # Show success message
+                st.success(f"✅ Demo calls data loaded successfully!")
+                st.info(f"📞 **{len(calls_data):,}** call records loaded")
+                
+                st.rerun()
+            else:
+                st.error("❌ Failed to process demo calls data")
+                for error in error_messages:
+                    st.error(error)
+                        
+    except Exception as e:
+        st.error(f"❌ Error loading demo calls data: {str(e)}")
+
+def load_demo_data_combined():
+    """Load demo data for Combined Analytics tab - loads both email and calls data"""
+    import os
+    
+    try:
+        # Define demo file paths
+        demo_files = {
+            'send_mails': 'data/send_data.csv',
+            'open_mails': 'data/open_data.csv', 
+            'contacts': 'data/contacts.csv',
+            'calls': 'data/calls_data.csv'
+        }
+        
+        # Check if demo files exist
+        missing_files = []
+        for file_key, file_path in demo_files.items():
+            if not os.path.exists(file_path):
+                missing_files.append(file_path)
+        
+        if missing_files:
+            st.error(f"❌ Demo files not found: {', '.join(missing_files)}")
+            return
+            
+        with st.spinner("Loading combined demo data..."):
+            # Process email files (send + open + contacts)
+            email_files = {
+                'send_mails': demo_files['send_mails'],
+                'open_mails': demo_files['open_mails'],
+                'contacts': demo_files['contacts']
+            }
+            
+            email_result = st.session_state.data_processor.process_files(email_files)
+            
+            # Handle email result format
+            if len(email_result) == 6:
+                successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = email_result
+            elif len(email_result) == 4:
+                successful_data, failed_data, validation_errors, original_send_count = email_result
+                send_df, send_open_df = None, None
+            elif len(email_result) == 3:
+                successful_data, failed_data, validation_errors = email_result
+                original_send_count = len(successful_data) if successful_data is not None else 0
+                send_df, send_open_df = None, None
+            else:
+                successful_data, failed_data = email_result
+                validation_errors = []
+                original_send_count = len(successful_data) if successful_data is not None else 0
+                send_df, send_open_df = None, None
+            
+            # Process calls file
+            with open(demo_files['calls'], 'rb') as calls_file:
+                calls_success, calls_errors, calls_data = st.session_state.calls_processor.process_calls_file(calls_file)
+            
+            # Store results in session state
+            if successful_data is not None and calls_success:
+                # Store email data
+                st.session_state.successful_data = successful_data
+                st.session_state.failed_data = failed_data
+                st.session_state.original_send_count = original_send_count
+                st.session_state.send_df = send_df
+                st.session_state.send_open_df = send_open_df
+                
+                # Store calls data
+                st.session_state.calls_data = calls_data
+                
+                # Perform the email-calls join to create combined data
+                joined_data, email_only_data, calls_only_data, join_stats = st.session_state.combined_processor.join_email_calls(
+                    successful_data, calls_data
+                )
+                
+                if joined_data is not None:
+                    # Store joined data in combined session state
+                    st.session_state.combined_joined_data = joined_data
+                    st.session_state.combined_email_only_data = email_only_data
+                    st.session_state.combined_calls_only_data = calls_only_data
+                    st.session_state.combined_join_stats = join_stats
+                    st.session_state.combined_email_failed = failed_data
+                    
+                    # Create metadata
+                    metadata = {
+                        'email_total': len(successful_data) + len(failed_data),
+                        'email_successful': len(successful_data),
+                        'email_failed': len(failed_data),
+                        'calls_total': len(calls_data),
+                        'joined_records': join_stats['joined_records'],
+                        'email_only_records': join_stats['email_only_records'],
+                        'calls_only_records': join_stats['calls_only_records'],
+                        'join_success_rate': join_stats['join_success_rate'],
+                        'processing_timestamp': datetime.now().isoformat(),
+                        'data_source': 'demo_files'
+                    }
+                    st.session_state.combined_metadata = metadata
+                
+                # Show success message
+                st.success(f"✅ Combined demo data loaded successfully!")
+                st.info(f"📧 **Email**: {len(successful_data):,} records | 📞 **Calls**: {len(calls_data):,} records")
+                
+                if joined_data is not None:
+                    st.info(f"🔗 **Join Results**: {join_stats['joined_records']} records with both email and calls data")
+                
+                if validation_errors or calls_errors:
+                    with st.expander("⚠️ Validation Issues", expanded=False):
+                        for error in validation_errors + calls_errors:
+                            st.warning(error)
+                            
+                st.rerun()
+            else:
+                st.error("❌ Failed to process combined demo data")
+                for error in validation_errors + calls_errors:
+                    st.error(error)
+                        
+    except Exception as e:
+        st.error(f"❌ Error loading combined demo data: {str(e)}")
 
 def show_welcome_message():
     st.info("👆 Upload your CSV files using the sidebar to get started")
@@ -332,10 +946,12 @@ def show_kpi_cards(final_data, send_df, send_open_df):
             st.metric("Total Prospect Count", "N/A", help="Send data not available")
     
     with col3:
-        # Open Rate: % of sends that got matched with opens (only opened emails are in open mails CSV)
+        # Open Rate: % of sends that have actual open data (non-NULL Views)
         if send_df is not None and send_open_df is not None:
-            open_rate = (len(send_open_df) / len(send_df) * 100) if len(send_df) > 0 else 0
-            st.metric("Open Rate", f"{open_rate:.1f}%", help="% of sends that were opened (matched with Open Mails CSV)")
+            # Count records with non-NULL Views (actual opens)
+            actual_opens_count = send_open_df['Views'].notna().sum() if 'Views' in send_open_df.columns else 0
+            open_rate = (actual_opens_count / len(send_df) * 100) if len(send_df) > 0 else 0
+            st.metric("Open Rate", f"{open_rate:.1f}%", help="% of sends that were actually opened (have non-NULL Views)")
         else:
             st.metric("Open Rate", "N/A", help="Send-Open data not available")
     
@@ -360,20 +976,22 @@ def show_kpi_cards(final_data, send_df, send_open_df):
     #     st.metric("Click Rate", f"{click_rate:.1f}%", help="Total Clicks / Total Sends")
     
     with col4:
-        # Opened Prospect Count: Unique emails in Send-Open data
-        if send_open_df is not None and 'Recipient Email' in send_open_df.columns:
-            opened_prospect_count = send_open_df['Recipient Email'].nunique()
-            st.metric("Opened Prospect Count", f"{opened_prospect_count:,}", help="Unique prospects in Send-Open data")
+        # Opened Prospect Count: Unique emails with actual opens (non-NULL Views)
+        if send_open_df is not None and 'Recipient Email' in send_open_df.columns and 'Views' in send_open_df.columns:
+            # Only count unique emails that have non-NULL Views
+            opened_prospects = send_open_df[send_open_df['Views'].notna()]['Recipient Email'].nunique()
+            st.metric("Opened Prospect Count", f"{opened_prospects:,}", help="Unique prospects with actual opens (non-NULL Views)")
         else:
             st.metric("Opened Prospect Count", "N/A", help="Send-Open data not available")
     
     with col5:
         # Prospect Opened: Opened Prospect Count / Total Prospect Count * 100
-        if send_open_df is not None and send_df is not None and 'Recipient Email' in send_open_df.columns and 'Recipient Email' in send_df.columns:
-            opened_prospect_count = send_open_df['Recipient Email'].nunique()
+        if send_open_df is not None and send_df is not None and 'Recipient Email' in send_open_df.columns and 'Recipient Email' in send_df.columns and 'Views' in send_open_df.columns:
+            # Count unique prospects with actual opens (non-NULL Views)
+            opened_prospect_count = send_open_df[send_open_df['Views'].notna()]['Recipient Email'].nunique()
             total_prospect_count = send_df['Recipient Email'].nunique()
             prospect_opened_rate = (opened_prospect_count / total_prospect_count * 100) if total_prospect_count > 0 else 0
-            st.metric("Prospect Opened", f"{prospect_opened_rate:.1f}%", help="Opened Prospect Count / Total Prospect Count * 100")
+            st.metric("Prospect Opened", f"{prospect_opened_rate:.1f}%", help="% of unique prospects with actual opens (non-NULL Views)")
         else:
             st.metric("Prospect Opened", "N/A", help="Send or Send-Open data not available")
     
@@ -556,6 +1174,7 @@ def calculate_high_engagement_accounts(data):
     High engagement = companies where Total Views > 2 × Total Emails Sent
     - Respects current date range and account owner filters
     - Groups by Company URL to get company-level metrics
+    - Handles NULL Views by treating them as 0
     """
     if 'Company URL' not in data.columns or 'Views' not in data.columns:
         return 0
@@ -563,8 +1182,8 @@ def calculate_high_engagement_accounts(data):
     # Group by Company URL to get company-level aggregation
     company_engagement = data.groupby('Company URL').agg({
         'recipient_name': 'count',  # Total emails sent to this company
-        'Views': 'sum',             # Total views from this company
-        'Clicks': 'sum'             # Total clicks from this company
+        'Views': lambda x: x.fillna(0).sum(),  # Total views (NULL treated as 0)
+        'Clicks': lambda x: x.fillna(0).sum()  # Total clicks (NULL treated as 0)
     }).reset_index()
     
     company_engagement.columns = ['Company URL', 'Total_Emails', 'Total_Views', 'Total_Clicks']
@@ -1068,6 +1687,332 @@ def show_failed_records(failed_data):
         mime="text/csv",
         key="all_failures"
     )
+
+def show_combined_dashboard():
+    """Handle the combined email and calls analytics dashboard - reuses processed data from other tabs"""
+    # Check what data is already available from other tabs
+    email_processed = 'successful_data' in st.session_state and st.session_state.successful_data is not None
+    calls_processed = 'calls_data' in st.session_state and st.session_state.calls_data is not None
+    
+    # Sidebar for demo/upload choice and data status
+    with st.sidebar:
+        st.header("🎛️ Data Source")
+        
+        # Demo vs using data from other tabs
+        data_source = st.radio(
+            "Choose data source:",
+            ["📂 Use Demo Files", "🔄 Use Data from Other Tabs"],
+            index=0,  # Default to demo files
+            key="combined_data_source"
+        )
+        
+        if data_source == "📂 Use Demo Files":
+            st.success("✅ Using pre-loaded demo files")
+            st.info("Demo includes Send, Open, Calls, and Contacts data")
+            
+            # Demo file processing button
+            if st.button("Load Demo Data", type="primary", key="load_demo_combined"):
+                load_demo_data_combined()
+                
+        else:  # Use data from other tabs
+            st.header("📊 Combined Analytics Data")
+            
+            # Show data availability status
+            st.subheader("📋 Available Data")
+            
+            email_status = "✅ Available" if email_processed else "❌ Not Available"
+            calls_status = "✅ Available" if calls_processed else "❌ Not Available"
+            
+            st.markdown(f"""
+            **From Other Tabs:**
+            - 📧 **Email Analytics**: {email_status}
+            - 📞 **Calls Analytics**: {calls_status}
+            """)
+            
+            if email_processed:
+                email_count = len(st.session_state.successful_data)
+                st.info(f"📧 Email data: {email_count:,} processed records ready to use")
+            
+            if calls_processed:
+                calls_count = len(st.session_state.calls_data)
+                st.info(f"📞 Calls data: {calls_count:,} processed records ready to use")
+            
+            st.markdown("---")
+            
+            # Action based on availability
+            if email_processed and calls_processed:
+                # Both available - offer to combine
+                st.success("🎉 Both Email and Calls data are available!")
+                st.markdown("**Ready to create combined analytics**")
+                
+                if st.button("🚀 Create Combined Analytics", type="primary", key="create_combined"):
+                    with st.spinner("Creating combined analytics from existing data..."):
+                        try:
+                            # Use existing processed data instead of reprocessing files
+                            email_data = st.session_state.successful_data  # Final processed email data
+                            calls_data = st.session_state.calls_data       # Processed calls data
+                            email_failed = st.session_state.get('failed_data', pd.DataFrame())
+                            
+                            # Perform the email-calls join
+                            joined_data, email_only_data, calls_only_data, join_stats = st.session_state.combined_processor.join_email_calls(
+                                email_data, calls_data
+                            )
+                            
+                            if joined_data is not None:
+                                # Store joined data in combined session state
+                                st.session_state.combined_joined_data = joined_data  # This is the main combined data
+                                st.session_state.combined_email_only_data = email_only_data
+                                st.session_state.combined_calls_only_data = calls_only_data
+                                st.session_state.combined_join_stats = join_stats
+                                st.session_state.combined_email_failed = email_failed
+                                
+                                # Create metadata from joined data
+                                metadata = {
+                                    'email_total': len(email_data) + len(email_failed),
+                                    'email_successful': len(email_data),
+                                    'email_failed': len(email_failed),
+                                    'calls_total': len(calls_data),
+                                    'joined_records': join_stats['joined_records'],
+                                    'email_only_records': join_stats['email_only_records'],
+                                    'calls_only_records': join_stats['calls_only_records'],
+                                    'join_success_rate': join_stats['join_success_rate'],
+                                    'processing_timestamp': datetime.now().isoformat(),
+                                    'data_source': 'joined_from_other_tabs'
+                                }
+                                st.session_state.combined_metadata = metadata
+                                
+                                st.success("Combined analytics created successfully with email-calls join!")
+                            
+                                # Show join summary
+                                st.info(f"🔗 **Email-Calls Join Results:**\n"
+                                       f"- Email records with calls: {join_stats['joined_records']:,}\n"
+                                       f"- Email only (no calls): {join_stats['email_only_records']:,}\n"
+                                       f"- Calls only (no emails): {join_stats['calls_only_records']:,}\n"
+                                       f"- Join success rate: {join_stats['join_success_rate']:.1f}%")
+                                
+                                st.info(f"📧 **Original Email Data:**\n"
+                                       f"- Total email records: {len(email_data):,}\n"
+                                       f"- Failed email records: {len(email_failed):,}")
+                                
+                                st.info(f"📞 **Original Calls Data:**\n"
+                                       f"- Total call records: {len(calls_data):,}")
+                                
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to join email and calls data: {join_stats.get('error', 'Unknown error')}")
+                        
+                        except Exception as e:
+                            st.error(f"Error creating combined analytics: {str(e)}")
+            
+            elif email_processed:
+                # Only email available
+                st.warning("📧 Email data available, but Calls data needed")
+                st.markdown("**Go to Calls Analytics tab to process calls data first**")
+                
+            elif calls_processed:
+                # Only calls available  
+                st.warning("📞 Calls data available, but Email data needed")
+                st.markdown("**Go to Email Analytics tab to process email data first**")
+                
+            else:
+                # Neither available
+                st.info("ℹ️ **No data available yet**")
+                st.markdown("""
+                **To use Combined Analytics:**
+                1. Process data in **📧 Email Analytics** tab first
+                2. Process data in **📞 Calls Analytics** tab  
+                3. Return here to see combined insights
+                """)
+    
+    
+    # Main combined dashboard content
+    if 'combined_joined_data' in st.session_state:
+        show_combined_analytics()
+    else:
+        show_combined_welcome()
+
+def show_combined_analytics():
+    """Display the combined email and calls analytics - same format as Email Analytics tab"""
+    st.header("📊 Combined Email & Calls Analytics")
+    st.markdown("---")
+    
+    # Get joined data from session state
+    joined_data = st.session_state.combined_joined_data
+    join_stats = st.session_state.combined_join_stats
+    metadata = st.session_state.combined_metadata
+    
+    # Display join summary KPIs
+    st.subheader("🔗 Join Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("Total Email Records", f"{join_stats['total_email_records']:,}")
+    
+    with col2:
+        st.metric("Email-Calls Matches", f"{join_stats['joined_records']:,}")
+    
+    with col3:
+        st.metric("Join Success Rate", f"{join_stats['join_success_rate']:.1f}%")
+    
+    with col4:
+        st.metric("Email Only", f"{join_stats['email_only_records']:,}")
+    
+    st.markdown("---")
+    
+    # Main data display - similar to Email Analytics tab
+    st.subheader("📋 Combined Email & Calls Records")
+    
+    if len(joined_data) > 0:
+        # Show summary of what columns were added from calls
+        calls_columns_added = [col for col in ['Assigned', 'Call Disposition', 'Call Date', 'Call Duration (seconds)', 'Full Comments'] if col in joined_data.columns]
+        if calls_columns_added:
+            st.info(f"📞 **Calls data joined**: {', '.join(calls_columns_added)}")
+        
+        # Display the joined data table
+        st.dataframe(joined_data, use_container_width=True)
+        st.caption(f"Showing all {len(joined_data)} combined email-calls records")
+        
+        # Download option for joined data
+        csv_data = joined_data.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Combined Data",
+            data=csv_data,
+            file_name=f"combined_email_calls_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            key="download_combined"
+        )
+        
+    else:
+        st.warning("No combined data available")
+    
+    st.markdown("---")
+    
+    # High Engagement Accounts Analysis - Enhanced with Call Data
+    show_combined_engagement_table(joined_data)
+    
+    # Show email-only and calls-only data if they exist
+    if 'combined_email_only_data' in st.session_state and len(st.session_state.combined_email_only_data) > 0:
+        st.markdown("---")
+        st.subheader("📧 Email Only Records (No Matching Calls)")
+        email_only_data = st.session_state.combined_email_only_data
+        st.dataframe(email_only_data, use_container_width=True)
+        st.caption(f"Showing {len(email_only_data)} email records with no matching calls")
+    
+    if 'combined_calls_only_data' in st.session_state and len(st.session_state.combined_calls_only_data) > 0:
+        st.markdown("---")
+        st.subheader("📞 Calls Only Records (No Matching Emails)")
+        calls_only_data = st.session_state.combined_calls_only_data
+        st.dataframe(calls_only_data, use_container_width=True)
+        st.caption(f"Showing {len(calls_only_data)} call records with no matching emails")
+
+def show_combined_engagement_table(data):
+    """Display high engagement accounts with enhanced call data display"""
+    st.subheader("🔥 Company Engagement Analysis (with Call Data)")
+    
+    if 'Company URL' not in data.columns or len(data) == 0:
+        st.warning("No company data available for engagement analysis.")
+        return
+    
+    # Group by Company URL to get company-level engagement metrics (same logic as Email Analytics)
+    company_engagement = data.groupby('Company URL').agg({
+        'recipient_name': 'count',  # Total emails sent
+        'Views': 'sum',             # Total views
+        'Clicks': 'sum'             # Total clicks
+    }).reset_index()
+    
+    company_engagement.columns = ['Company URL', 'Total Emails', 'Total Views', 'Total Clicks']
+    
+    # Calculate engagement rate and high engagement flag (same logic)
+    company_engagement['Engagement Rate'] = (company_engagement['Total Views'] / company_engagement['Total Emails'] * 100).round(1)
+    company_engagement['High Engagement'] = company_engagement['Total Views'] > (2 * company_engagement['Total Emails'])
+    
+    # Sort by engagement rate descending
+    company_engagement = company_engagement.sort_values('Engagement Rate', ascending=False)
+    
+    # Display summary
+    total_companies = len(company_engagement)
+    high_engagement_count = company_engagement['High Engagement'].sum()
+    st.info(f"📊 **{total_companies}** companies analyzed • **{high_engagement_count}** high engagement accounts (Views > 2× Emails)")
+    
+    # Display engagement table with expandable rows - ENHANCED with call data
+    for idx, company_row in company_engagement.iterrows():
+        company_url = company_row['Company URL']
+        total_emails = company_row['Total Emails']
+        total_views = company_row['Total Views']
+        total_clicks = company_row['Total Clicks']
+        engagement_rate = company_row['Engagement Rate']
+        is_high_engagement = company_row['High Engagement']
+        
+        # Get company data to calculate call metrics
+        company_data = data[data['Company URL'] == company_url].copy()
+        
+        # Calculate call metrics for this company (using new aggregated columns)
+        total_calls = company_data['Total_Calls'].sum() if 'Total_Calls' in company_data.columns else 0
+        connected_calls = company_data['Connected_Calls'].sum() if 'Connected_Calls' in company_data.columns else 0
+        
+        # Create expandable section for each company - ENHANCED header
+        engagement_indicator = "🔥 HIGH" if is_high_engagement else "📊 Normal"
+        
+        # Enhanced header with call data
+        header = f"""
+        {engagement_indicator} | **{company_url}**  
+        📧 {total_emails:>3} emails  │  👁️ {total_views:>4} views  │  🖱️ {total_clicks:>3} clicks  │  📊 {engagement_rate:>5.1f}% rate  │  📞 {total_calls:>3} calls  │  ✅ {connected_calls:>3} connected
+        """
+        
+        with st.expander(header.strip()):
+            if len(company_data) > 0:
+                # Show individual emails with COMPLETE RECORDS (email + call data)
+                # Select all relevant columns for display including new aggregated call metrics
+                display_columns = ['sent_date', 'Recipient Email', 'Views', 'Clicks']
+                
+                # Add new aggregated call columns if they exist
+                call_columns = ['Total_Calls', 'Connected_Calls', 'Total_Call_Duration', 'Latest_Call_Date']
+                available_call_columns = [col for col in call_columns if col in company_data.columns]
+                display_columns.extend(available_call_columns)
+                
+                # Create enhanced display data
+                individual_emails = company_data[display_columns].copy()
+                
+                # Sort options
+                col1, col2 = st.columns([1, 3])
+                with col1:
+                    sort_options = ['Views', 'Clicks', 'sent_date', 'Total_Calls', 'Connected_Calls']
+                    sort_option = st.selectbox(
+                        "Sort by:",
+                        sort_options,
+                        key=f"combined_sort_{company_url}"
+                    )
+                
+                # Sort the data
+                ascending = sort_option == 'sent_date'  # Only sent_date in ascending
+                individual_emails = individual_emails.sort_values(sort_option, ascending=ascending)
+                
+                # Display enhanced individual emails table with complete records including call metrics
+                st.dataframe(
+                    individual_emails,
+                    use_container_width=True,
+                    height=min(400, len(individual_emails) * 35 + 50)  # Increased height for more columns
+                )
+                
+                # Enhanced summary with call data using new aggregated columns
+                total_individual_emails = len(individual_emails)
+                total_individual_views = individual_emails['Views'].sum()
+                total_individual_clicks = individual_emails['Clicks'].sum()
+                total_individual_calls = individual_emails['Total_Calls'].sum() if 'Total_Calls' in individual_emails.columns else 0
+                total_connected_calls = individual_emails['Connected_Calls'].sum() if 'Connected_Calls' in individual_emails.columns else 0
+                
+                st.info(f"📧 **{total_individual_emails}** emails • **{total_individual_views}** views • **{total_individual_clicks}** clicks • **{total_individual_calls}** calls • **{total_connected_calls}** connected")
+            else:
+                st.warning("No recipient data available for this company.")
+
+def show_combined_welcome():
+    """Show welcome message for combined dashboard"""
+    st.header("📊 Combined Email & Calls Analytics")
+    st.markdown("---")
+    
+    st.markdown("""
+    Upload and process the files in **Email Analytics** and **Calls Analytics** tabs first, then click on **Create Combined Analytics** to see the joined data.
+    """)
 
 if __name__ == "__main__":
     main()

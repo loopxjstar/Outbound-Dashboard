@@ -345,3 +345,53 @@ The CSV Analytics Dashboard is now a production-ready application that successfu
 - **Deployment Platform**: Render (Free Tier)
 
 **Project successfully configured for 2-file system with streamlined processing and all core functionality intact.**
+
+## Version 2 of Calls Analytics (Future Implementation)
+
+### 📊 **Advanced Analytical Table Structure**
+
+**Requirement**: Create a complex analytical table for calls data with multi-dimensional analysis.
+
+### **X-Axis (Columns):**
+- **Column 1**: "Assigned" unique values (e.g., John Smith, Jane Doe)
+- **Column 2**: "Call Disposition" unique values as sub-rows under each Assigned person
+  - So under "John Smith" you'd have sub-rows like:
+    - Connected
+    - Not Interested  
+    - Callback
+    - etc.
+
+### **Y-Axis (Rows):**
+- **Date ranges split by weeks** (Week 1, Week 2, Week 3, etc.)
+
+### **Cell Values (What shows in each intersection):**
+For each combination of (Week + Assigned Person + Call Disposition), display:
+1. **Number of records** (count)
+2. **Connect rate** (% of Connected calls for that person/disposition/week)
+3. **Company / Account** count (unique companies for that cell)
+
+### **Example Table Layout:**
+```
+                    John Smith                    |    Jane Doe
+Week        Connected | Not Int. | Callback      | Connected | Not Int. | Callback
+Week 1      5 records | 3 records| 2 records    | 4 records | 1 record | 0 records
+            80% conn  | 0% conn  | 0% conn      | 100% conn | 0% conn  | 0% conn
+            3 comp.   | 2 comp.  | 1 comp.      | 2 comp.   | 1 comp.  | 0 comp.
+            
+Week 2      8 records | 2 records| 1 record     | 6 records | 3 records| 1 record
+            75% conn  | 0% conn  | 0% conn      | 83% conn  | 0% conn  | 0% conn
+            4 comp.   | 2 comp.  | 1 comp.      | 3 comp.   | 2 comp.  | 1 comp.
+```
+
+### **Implementation Questions for Future:**
+1. Should this table be **filtered** by the current filter selections, or show **all data**?
+2. For "Connect rate" in each cell - connect rate **within that specific disposition** OR **for that person in that week across all dispositions**?
+3. Should weeks be **calendar weeks** or **rolling 7-day periods** from the data?
+4. How to handle cases where someone has 0 records for a disposition in a week?
+
+### **Technical Considerations:**
+- Multi-level grouping: Week → Assigned → Call Disposition
+- Complex pivot table with multiple metrics per cell
+- Dynamic column generation based on unique Assigned/Disposition values
+- Week-based date aggregation and formatting
+- Responsive table design for multiple columns

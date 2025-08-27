@@ -714,22 +714,55 @@ class DataProcessor:
         # Combine results from both phases
         all_successful = phase1_successful + phase2_successful
         
+        # Add ALL unmatched Send records with NULL Open values (Complete LEFT JOIN)
+        unmatched_with_nulls = []
+        for failed_record in final_failed:
+            # Include ALL failed Send records regardless of failure reason
+            # This ensures complete LEFT JOIN: ALL Send records are preserved
+            
+            # Create record with Send data + NULL Open fields
+            record_with_nulls = failed_record.copy()
+            # Remove failure tracking fields
+            record_with_nulls.pop('failure_reason', None)
+            record_with_nulls.pop('match_count', None)
+            
+            # Add NULL Open fields
+            open_fields_to_add = [col for col in open_df.columns if col not in ['recipient_name', 'sent_date']]
+            for field in open_fields_to_add:
+                record_with_nulls[field] = None  # NULL value
+            
+            unmatched_with_nulls.append(record_with_nulls)
+        
+        # Combine successful matches + unmatched with NULLs
+        all_records_with_nulls = all_successful + unmatched_with_nulls
+        
+        # Update final failed to exclude ALL records we moved to successful (Complete LEFT JOIN)
+        # Since we're including ALL failed Send records in successful with NULLs,
+        # the failed dataset should be empty (true LEFT JOIN behavior)
+        final_failed_excluding_nulls = []
+        
         # Create final DataFrames
-        successful_df = pd.DataFrame(all_successful) if all_successful else pd.DataFrame()
-        failed_df = pd.DataFrame(final_failed) if final_failed else pd.DataFrame()
+        successful_df = pd.DataFrame(all_records_with_nulls) if all_records_with_nulls else pd.DataFrame()
+        failed_df = pd.DataFrame(final_failed_excluding_nulls) if final_failed_excluding_nulls else pd.DataFrame()
         
         # Views column is already correct, no renaming needed
         
-        # Log final statistics
+        # Log final statistics - Complete LEFT JOIN results
         total_processed = len(send_df)
         total_successful = len(successful_df)
         total_failed = len(failed_df)
-        final_success_rate = (total_successful / total_processed * 100) if total_processed > 0 else 0
         
-        logger.info(f"Final Results:")
-        logger.info(f"  Total processed: {total_processed}")
-        logger.info(f"  Total successful: {total_successful} ({final_success_rate:.1f}%)")
-        logger.info(f"  Total failed: {total_failed} ({100-final_success_rate:.1f}%)")
+        # Calculate how many records actually matched with Open data
+        total_matched_with_opens = len(all_successful)  # Records with actual Open data
+        total_with_nulls = len(unmatched_with_nulls)   # Records with NULL Open data
+        match_rate = (total_matched_with_opens / total_processed * 100) if total_processed > 0 else 0
+        
+        logger.info(f"Complete LEFT JOIN Results:")
+        logger.info(f"  Total Send records processed: {total_processed}")
+        logger.info(f"  Records with Open data: {total_matched_with_opens} ({match_rate:.1f}%)")
+        logger.info(f"  Records with NULL Open data: {total_with_nulls} ({100-match_rate:.1f}%)")
+        logger.info(f"  Final Send-Open dataset: {total_successful} (100% of Send records preserved)")
+        logger.info(f"  Failed records (should be 0): {total_failed}")
         
         return successful_df, failed_df
     
