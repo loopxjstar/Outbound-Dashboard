@@ -22,7 +22,8 @@ class DataProcessor:
                 'Date': 'sent_date',
                 'recipient_email': 'Recipient Email',  # Lowercase mapping to system column
                 'recipient_name': 'recipient_name',    # Direct mapping
-                'sent_date': 'sent_date'               # Direct mapping
+                'sent_date': 'sent_date',              # Direct mapping
+                'Recipient Email': 'Recipient Email'   # Keep as-is for backward compatibility
             },
             'open_mails': {
                 'Recipient': 'recipient_name',     # User's "Recipient" → system's "recipient_name"
@@ -116,25 +117,15 @@ class DataProcessor:
                 
                 # Validation Rule 3: Apply column mapping and check for required columns
                 mapped_columns = {}
-                missing_columns = []
                 
                 for user_column, system_column in file_def['mapping'].items():
                     if user_column in available_columns:
                         mapped_columns[user_column] = system_column
                         logger.info(f"✅ Mapped '{user_column}' → '{system_column}' in {file_def['display_name']}")
-                    else:
+                    elif system_column in available_columns:
                         # Check if the system column exists directly (backward compatibility)
-                        if system_column in available_columns:
-                            mapped_columns[system_column] = system_column
-                            logger.info(f"✅ Found direct match '{system_column}' in {file_def['display_name']}")
-                        else:
-                            missing_columns.append(f"'{user_column}' (maps to '{system_column}')")
-                
-                # Report missing columns
-                if missing_columns:
-                    error_messages.append(f"❌ **Missing Columns** in {file_def['display_name']}: {', '.join(missing_columns)}")
-                    error_messages.append(f"📋 **Available Columns in the uploaded sheet**: {', '.join(available_columns)}")
-                    continue
+                        mapped_columns[system_column] = system_column
+                        logger.info(f"✅ Found direct match '{system_column}' in {file_def['display_name']}")
                 
                 # Validation Rule 4: Apply the mapping to rename columns
                 df_mapped = df.copy()
@@ -147,7 +138,9 @@ class DataProcessor:
                 final_columns = list(df_mapped.columns)
                 missing_required = [col for col in file_def['required_columns'] if col not in final_columns]
                 if missing_required:
-                    error_messages.append(f"❌ **Missing Required Columns** in {file_def['display_name']} after mapping: {', '.join(missing_required)}")
+                    error_messages.append(f"❌ **Missing Required Columns** in {file_def['display_name']}: {', '.join(missing_required)}")
+                    error_messages.append(f"📋 **Available columns after mapping**: {', '.join(final_columns)}")
+                    error_messages.append(f"📋 **Original columns in file**: {', '.join(available_columns)}")
                     continue
                 
                 # Validation Rule 6: Data type and content validation
@@ -672,6 +665,89 @@ class DataProcessor:
         
         logger.info(f"Cleaned {file_type} data: {len(df)} rows remaining")
         return df
+    
+    def process_multi_sdr_combined(self, combined_send_open_df, contacts_file='data/contacts.csv'):
+        """
+        Process the combined Send-Open data from multiple SDRs by joining with contacts.
+        
+        Args:
+            combined_send_open_df: DataFrame with all SDRs' Send-Open joined data
+            contacts_file: Path to contacts CSV
+            
+        Returns: (final_successful_df, failed_df, errors)
+        """
+        try:
+            # Load and validate contacts
+            contacts_df = pd.read_csv(contacts_file)
+            contacts_df = self._clean_data(contacts_df, 'contacts')
+            
+            # Join combined Send-Open data with contacts
+            contacts_result = self._join_with_contacts(combined_send_open_df, contacts_df)
+            
+            # Check if contacts join returned an error
+            if len(contacts_result) == 3:
+                # Error case
+                return None, None, contacts_result[2]
+            else:
+                # Success case
+                contacts_successful, contacts_failed = contacts_result
+                return contacts_successful, contacts_failed, []
+                
+        except Exception as e:
+            logger.error(f"Error in multi-SDR contacts join: {str(e)}")
+            return None, None, [f"Error: {str(e)}"]
+    
+    def process_single_sdr(self, send_file, open_file, sdr_name=None):
+        """
+        Process a single SDR's Send and Open files, performing just the Send-Open join.
+        This is used for multi-SDR processing where each SDR is joined individually.
+        
+        Returns: (send_open_joined_df, failed_df, errors)
+        """
+        try:
+            # Step 1: Validate Send and Open files only
+            files = {
+                'send_mails': send_file,
+                'open_mails': open_file,
+                'contacts': 'data/contacts.csv'  # Dummy, just for validation to pass
+            }
+            
+            is_valid, error_messages, mapped_dataframes = self.sheets_validator(files)
+            
+            if not is_valid:
+                # Filter out contacts-related errors since we're not using it here
+                relevant_errors = [e for e in error_messages if 'Contacts' not in e]
+                if relevant_errors:
+                    return None, None, relevant_errors
+            
+            # Step 2: Extract Send and Open dataframes
+            send_df = mapped_dataframes.get('send_mails')
+            open_df = mapped_dataframes.get('open_mails')
+            
+            if send_df is None or open_df is None:
+                return None, None, ["Missing Send or Open data after validation"]
+            
+            # Step 3: Clean data
+            send_df = self._clean_data(send_df, 'send')
+            open_df = self._clean_data(open_df, 'open')
+            
+            # Step 4: Perform Send-Open join
+            send_open_successful, send_open_failed = self._join_send_open(send_df, open_df)
+            
+            if send_open_successful is None:
+                return None, None, ["Failed to join Send and Open data"]
+            
+            # Step 5: Add SDR name column if provided
+            if sdr_name:
+                send_open_successful['SDR_Name'] = sdr_name
+                if len(send_open_failed) > 0:
+                    send_open_failed['SDR_Name'] = sdr_name
+            
+            return send_open_successful, send_open_failed, []
+            
+        except Exception as e:
+            logger.error(f"Error processing single SDR: {str(e)}")
+            return None, None, [f"Error: {str(e)}"]
     
     def _join_send_open(self, send_df, open_df):
         """Join send and open dataframes with incremental datetime matching"""

@@ -47,142 +47,187 @@ def main():
         show_combined_dashboard()
 
 def show_email_dashboard():
-    """Handle the complete email analytics dashboard - unchanged from original"""
-    # Sidebar for demo/upload choice and file uploads
+    """Handle the multi-SDR email analytics dashboard with card-based UI"""
+    
+    # Initialize SDR data in session state if not present
+    if 'sdr_data' not in st.session_state:
+        st.session_state.sdr_data = {}
+    if 'num_sdrs' not in st.session_state:
+        st.session_state.num_sdrs = 1  # Start with 1 SDR card
+    
+    # Sidebar for demo/upload choice
     with st.sidebar:
-        st.header("🎛️ Data Source")
+        st.header("📧 Email Data")
         
-        # Demo vs Upload choice
+        # Pre-processed vs Upload choice
         data_source = st.radio(
             "Choose data source:",
-            ["📂 Use Demo Files", "📤 Upload My Files"],
+            ["📂 Use Pre-processed Data", "📤 Upload Multiple SDR Files"],
             index=0,  # Default to demo files
             key="email_data_source"
         )
         
-        if data_source == "📂 Use Demo Files":
-            st.success("✅ Using pre-loaded demo files")
-            st.info("Demo files include sample Send Mails, Open Mails, and Contacts data")
+        if data_source == "📂 Use Pre-processed Data":
+            st.success("✅ Using pre-processed data")
+            st.info("Loads processed email data from `data/processed_files/`")
             
-            # Demo file processing button
-            if st.button("Load Send-Open Data", type="primary", key="load_demo_email"):
-                load_demo_data_email()
+            # Pre-processed data loading button
+            if st.button("Load Pre-processed Data", type="primary", key="load_demo_email"):
+                load_demo_data_multi_sdr()
+    
+    # Main area for multi-SDR file upload
+    if data_source == "📤 Upload Multiple SDR Files":
+        st.header("📊 Multi-SDR Data Upload")
+        st.info("Upload Send and Open files for each SDR separately. They will be joined individually then combined.")
+        
+        # Add/Remove SDR controls
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 4])
+        with col1:
+            st.markdown("### 👥 SDR Management")
+        with col2:
+            if st.button("➕ Add SDR", key="add_sdr"):
+                st.session_state.num_sdrs = min(st.session_state.num_sdrs + 1, 10)  # Max 10 SDRs
+                st.rerun()
+        with col3:
+            if st.button("➖ Remove SDR", key="remove_sdr"):
+                if st.session_state.num_sdrs > 1:
+                    st.session_state.num_sdrs -= 1
+                    # Remove the last SDR's data
+                    sdr_key = f"sdr_{st.session_state.num_sdrs}"
+                    if sdr_key in st.session_state.sdr_data:
+                        del st.session_state.sdr_data[sdr_key]
+                    st.rerun()
+        
+        st.divider()
+        
+        # Create card layout for SDRs
+        num_cols = min(3, st.session_state.num_sdrs)  # Max 3 columns per row
+        sdr_cards_data = []
+        
+        for i in range(st.session_state.num_sdrs):
+            sdr_cards_data.append(i)
+        
+        # Process SDRs in rows of 3
+        for row_start in range(0, len(sdr_cards_data), 3):
+            cols = st.columns(min(3, len(sdr_cards_data) - row_start))
             
-        else:  # Upload My Files
-            st.header("📁 File Upload")
-            
-            # File uploaders
-            send_file = st.file_uploader("Upload Send Mails CSV", type=['csv'], key='send_mails')
-            open_file = st.file_uploader("Upload Open Mails CSV", type=['csv'], key='open_mails')
-            # account_history_file = st.file_uploader("Upload Account History CSV", type=['csv'], key='account_history')
-            
-            # Contacts file info
-            st.info("📋 **Contacts CSV**: Using internal contacts database from `data/contacts.csv`")
-            # opportunity_details_file = st.file_uploader("Upload Opportunity Details CSV", type=['csv'], key='opportunity_details')
-            # contact_file = st.file_uploader("Upload Contact CSV (Optional)", type=['csv'], key='contact')
-            # account_file = st.file_uploader("Upload Account CSV (Optional)", type=['csv'], key='account')
-            
-            # Process files button
-            if st.button("Process Files", type="primary"):
-                if send_file and open_file:
-                    # Commented out: and opportunity_details_file
-                    with st.spinner("Processing files..."):
-                        try:
-                            # Save uploaded files
-                            files = {
-                                'send_mails': send_file,
-                                'open_mails': open_file,
-                                'contacts': 'data/contacts.csv'  # Internal contacts file
-                                # 'account_history': account_history_file,
-                                # 'opportunity_details': opportunity_details_file,
-                                # 'contact': contact_file,
-                                # 'account': account_file
-                            }
-                            
-                            # Process the data
-                            result = st.session_state.data_processor.process_files(files)
-                            
-                            if len(result) == 6:
-                                # New format: successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df
-                                successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = result
-                            elif len(result) == 4:
-                                # Old format: successful_data, failed_data, validation_errors, original_send_count
-                                successful_data, failed_data, validation_errors, original_send_count = result
-                                send_df, send_open_df = None, None
-                            elif len(result) == 3:
-                                # Older format: successful_data, failed_data, validation_errors
-                                successful_data, failed_data, validation_errors = result
-                                original_send_count = len(successful_data) if successful_data is not None else 0
-                                send_df, send_open_df = None, None
-                            else:
-                                # Backward compatibility
-                                successful_data, failed_data = result
-                                validation_errors = []
-                                original_send_count = len(successful_data) if successful_data is not None else 0
-                                send_df, send_open_df = None, None
-                            
-                            if successful_data is not None:
-                                # Store in session state
-                                st.session_state.successful_data = successful_data
-                                st.session_state.failed_data = failed_data
-                                st.session_state.original_send_count = original_send_count  # Store original send count
-                                st.session_state.send_df = send_df  # Store intermediate Send dataset
-                                st.session_state.send_open_df = send_open_df  # Store intermediate Send-Open dataset
-                                
-                                # Show summary
-                                total_processed = len(successful_data) + len(failed_data)
-                                success_rate = len(successful_data) / total_processed * 100 if total_processed > 0 else 0
-                                
-                                st.success(f"Files processed successfully!")
-                                st.info(f"📊 **Processing Summary:**\n"
-                                       f"- Total records: {total_processed:,}\n"
-                                       f"- Successful matches: {len(successful_data):,} ({success_rate:.1f}%)\n"
-                                       f"- Failed matches: {len(failed_data):,} ({100-success_rate:.1f}%)")
-                                
-                                # Set flag to scroll to top after rerun
-                                st.session_state.should_scroll_to_top = True
-                                
-                                st.rerun()
-                            else:
-                                # Show validation errors
-                                if validation_errors:
-                                    st.error("**File Validation Failed**")
-                                    for error in validation_errors:
-                                        st.error(error)
-                                else:
-                                    st.error("Error processing files")
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
-                else:
-                    st.warning("Please upload Send Mails and Open Mails CSV files")
-                    # Commented out: and Account History and Opportunity Details
+            for col_idx, sdr_idx in enumerate(sdr_cards_data[row_start:row_start + 3]):
+                with cols[col_idx]:
+                    with st.container(border=True):
+                        # Card header with status icon
+                        sdr_key = f"sdr_{sdr_idx}"
+                        sdr_info = st.session_state.sdr_data.get(sdr_key, {})
+                        
+                        # Check if SDR is ready
+                        is_ready = (sdr_info.get('name') and 
+                                   sdr_info.get('send_file') is not None and 
+                                   sdr_info.get('open_file') is not None)
+                        
+                        # Card title with status
+                        if is_ready:
+                            st.markdown(f"### ✅ SDR {sdr_idx + 1}")
+                        else:
+                            st.markdown(f"### 👤 SDR {sdr_idx + 1}")
+                        
+                        # SDR Name input
+                        sdr_name = st.text_input(
+                            "SDR Name",
+                            value=sdr_info.get('name', ''),
+                            key=f"sdr_name_{sdr_idx}",
+                            placeholder="e.g., John Smith"
+                        )
+                        
+                        # Send file uploader
+                        send_file = st.file_uploader(
+                            "📤 Send Mails CSV",
+                            type=['csv'],
+                            key=f"send_{sdr_idx}"
+                        )
+                        
+                        # Open file uploader
+                        open_file = st.file_uploader(
+                            "📥 Open Mails CSV",
+                            type=['csv'],
+                            key=f"open_{sdr_idx}"
+                        )
+                        
+                        # Store SDR data in session state
+                        st.session_state.sdr_data[sdr_key] = {
+                            'name': sdr_name,
+                            'send_file': send_file,
+                            'open_file': open_file,
+                            'index': sdr_idx
+                        }
+                        
+                        # Status indicator
+                        if is_ready:
+                            st.success("Ready to process")
+                        elif sdr_name and (send_file or open_file):
+                            missing = []
+                            if not send_file:
+                                missing.append("Send file")
+                            if not open_file:
+                                missing.append("Open file")
+                            st.warning(f"Missing: {', '.join(missing)}")
+                        elif sdr_name:
+                            st.info("Upload both files")
+                        else:
+                            st.info("Enter SDR name")
+        
+        # Processing section
+        st.divider()
+        
+        # Count ready SDRs
+        ready_sdrs = [sdr for sdr in st.session_state.sdr_data.values() 
+                      if sdr.get('name') and sdr.get('send_file') and sdr.get('open_file')]
+        
+        # Summary and process button
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            if ready_sdrs:
+                st.success(f"📊 {len(ready_sdrs)} SDR(s) ready to process")
+            else:
+                st.warning("No SDRs ready - please complete at least one SDR card")
+        
+        with col2:
+            st.info("📋 **Contacts CSV**: Using `data/contacts.csv`")
+        
+        with col3:
+            if st.button("🚀 Process All SDRs", 
+                        type="primary", 
+                        disabled=len(ready_sdrs) == 0,
+                        key="process_multi_sdr"):
+                process_multi_sdr_data(ready_sdrs)
     
     # Main email dashboard
     if 'successful_data' in st.session_state:
         show_dashboard()
     else:
-        show_welcome_message()
+        if data_source == "📤 Upload Multiple SDR Files":
+            show_multi_sdr_welcome()
+        else:
+            show_welcome_message()
 
 def show_calls_dashboard():
     """Handle the simple calls analytics dashboard"""
     # Sidebar for demo/upload choice and calls file upload
     with st.sidebar:
-        st.header("🎛️ Data Source")
+        st.header("📞 Calls Data")
         
-        # Demo vs Upload choice
+        # Pre-processed vs Upload choice
         data_source = st.radio(
             "Choose data source:",
-            ["📂 Use Demo Files", "📤 Upload My Files"],
+            ["📂 Use Pre-processed Data", "📤 Upload My Files"],
             index=0,  # Default to demo files
             key="calls_data_source"
         )
         
-        if data_source == "📂 Use Demo Files":
-            st.success("✅ Using pre-loaded demo calls data")
-            st.info("Demo file includes sample call records with various dispositions")
+        if data_source == "📂 Use Pre-processed Data":
+            st.success("✅ Using pre-processed calls data")
+            st.info("Loads processed calls data from `data/processed_files/`")
             
-            # Demo file processing button
-            if st.button("Load Calls Data", type="primary", key="load_demo_calls"):
+            # Pre-processed data loading button
+            if st.button("Load Pre-processed Data", type="primary", key="load_demo_calls"):
                 load_demo_data_calls()
                 
         else:  # Upload My Files
@@ -590,153 +635,420 @@ def load_demo_data_email():
         st.error(f"❌ Error loading demo data: {str(e)}")
 
 def load_demo_data_calls():
-    """Load demo data for Calls Analytics tab"""
+    """Load pre-processed demo calls data from processed_files folder"""
     import os
+    import json
     
     try:
-        # Define demo file path
-        demo_file_path = 'data/calls_data.csv'
+        st.info("🔄 Loading pre-processed calls data...")
         
-        # Check if demo file exists
-        if not os.path.exists(demo_file_path):
-            st.error(f"❌ Demo calls file not found: {demo_file_path}")
+        # Check if processed files exist
+        processed_calls_file = 'data/processed_files/processed_calls_data.csv'
+        metadata_file = 'data/processed_files/preprocessing_metadata.json'
+        
+        if not os.path.exists(processed_calls_file):
+            st.error("❌ Pre-processed calls data not found!")
+            st.info("🔧 Please run the preprocessing script first: `python preprocess_data.py`")
             return
-            
-        with st.spinner("Loading demo calls data..."):
-            # Open demo file and process through the same pipeline as uploaded files
-            with open(demo_file_path, 'rb') as demo_file:
-                is_valid, error_messages, calls_data = st.session_state.calls_processor.process_calls_file(demo_file)
-                
-            if is_valid:
-                # Store in session state (same as uploaded files)
-                st.session_state.calls_data = calls_data
-                
-                # Show success message
-                st.success(f"✅ Demo calls data loaded successfully!")
-                st.info(f"📞 **{len(calls_data):,}** call records loaded")
-                
-                st.rerun()
-            else:
-                st.error("❌ Failed to process demo calls data")
-                for error in error_messages:
-                    st.error(error)
+        
+        # Load processed calls data
+        calls_data = pd.read_csv(processed_calls_file)
+        
+        # Load metadata if exists
+        metadata = {}
+        if os.path.exists(metadata_file):
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+        
+        # Parse datetime columns if they exist
+        date_columns = ['Date', 'date', 'call_date']  # Common call date column names
+        for col in date_columns:
+            if col in calls_data.columns:
+                try:
+                    calls_data[col] = pd.to_datetime(calls_data[col])
+                    break  # Only convert the first matching column
+                except:
+                    continue
+        
+        # Store in session state
+        st.session_state.calls_data = calls_data
+        
+        # Calculate metrics from metadata or data
+        total_calls = len(calls_data)
+        
+        st.success(f"✅ Pre-processed calls data loaded successfully!")
+        
+        # Show processing summary
+        processing_info = []
+        processing_info.append(f"- Total call records: {total_calls:,}")
+        
+        # Show calls processing info from metadata
+        if 'calls_processing' in metadata:
+            calls_stats = metadata['calls_processing']
+            if 'total_records' in calls_stats:
+                processing_info.append(f"- Records processed: {calls_stats['total_records']:,}")
+            if 'errors' in calls_stats and calls_stats['errors']:
+                processing_info.append(f"- Processing warnings: {len(calls_stats['errors'])}")
+        
+        # Show processing date if available
+        if 'processing_date' in metadata:
+            processing_date = metadata['processing_date'][:19].replace('T', ' ')  # Format datetime
+            processing_info.append(f"- Processed on: {processing_date}")
+        
+        st.info("📞 **Processing Summary:**\n" + "\n".join(processing_info))
+        
+        st.rerun()
                         
     except Exception as e:
-        st.error(f"❌ Error loading demo calls data: {str(e)}")
+        st.error(f"Error loading pre-processed calls data: {str(e)}")
+        st.info("💡 Make sure to run: `python preprocess_data.py` first")
 
 def load_demo_data_combined():
-    """Load demo data for Combined Analytics tab - loads both email and calls data"""
+    """Load pre-processed combined data from processed_files folder"""
     import os
+    import json
     
     try:
-        # Define demo file paths
-        demo_files = {
-            'send_mails': 'data/send_data.csv',
-            'open_mails': 'data/open_data.csv', 
-            'contacts': 'data/contacts.csv',
-            'calls': 'data/calls_data.csv'
-        }
+        # Define pre-processed file paths
+        processed_combined_file = 'data/processed_files/processed_combined_data.csv'
+        processed_email_file = 'data/processed_files/processed_email_data.csv'
+        processed_calls_file = 'data/processed_files/processed_calls_data.csv'
+        contacts_failed_file = 'data/processed_files/contacts_failed_records.csv'
+        metadata_file = 'data/processed_files/preprocessing_metadata.json'
         
-        # Check if demo files exist
-        missing_files = []
-        for file_key, file_path in demo_files.items():
-            if not os.path.exists(file_path):
-                missing_files.append(file_path)
+        # Check if pre-processed files exist
+        required_files = [processed_combined_file, processed_email_file, processed_calls_file, metadata_file]
+        missing_files = [f for f in required_files if not os.path.exists(f)]
         
         if missing_files:
-            st.error(f"❌ Demo files not found: {', '.join(missing_files)}")
+            st.error(f"❌ Pre-processed files not found: {', '.join(missing_files)}")
+            st.info("💡 Please run the preprocessing script: `python preprocess_data.py`")
             return
             
-        with st.spinner("Loading combined demo data..."):
-            # Process email files (send + open + contacts)
-            email_files = {
-                'send_mails': demo_files['send_mails'],
-                'open_mails': demo_files['open_mails'],
-                'contacts': demo_files['contacts']
+        with st.spinner("Loading pre-processed combined data..."):
+            # Load metadata
+            with open(metadata_file, 'r') as f:
+                preprocessing_metadata = json.load(f)
+            
+            # Load pre-processed combined data
+            combined_data = pd.read_csv(processed_combined_file)
+            
+            # Load individual email and calls data for context
+            email_data = pd.read_csv(processed_email_file)
+            calls_data = pd.read_csv(processed_calls_file)
+            
+            # Convert date columns to datetime for all datasets
+            for df in [combined_data, email_data]:
+                if 'sent_date' in df.columns:
+                    df['sent_date'] = pd.to_datetime(df['sent_date'], errors='coerce')
+                if 'last_opened' in df.columns:
+                    df['last_opened'] = pd.to_datetime(df['last_opened'], errors='coerce')
+            
+            # Convert date columns for calls data
+            date_columns = ['Date', 'date', 'call_date']
+            for col in date_columns:
+                if col in calls_data.columns:
+                    calls_data[col] = pd.to_datetime(calls_data[col], errors='coerce')
+                    break
+            
+            # Load failed contacts records if exists
+            failed_data = None
+            if os.path.exists(contacts_failed_file):
+                failed_data = pd.read_csv(contacts_failed_file)
+                # Convert date columns for failed data too
+                if 'sent_date' in failed_data.columns:
+                    failed_data['sent_date'] = pd.to_datetime(failed_data['sent_date'], errors='coerce')
+                if 'last_opened' in failed_data.columns:
+                    failed_data['last_opened'] = pd.to_datetime(failed_data['last_opened'], errors='coerce')
+            else:
+                failed_data = pd.DataFrame()
+                
+            # Store in session state
+            st.session_state.successful_data = email_data
+            st.session_state.failed_data = failed_data
+            st.session_state.calls_data = calls_data
+            
+            # Store combined data
+            st.session_state.combined_joined_data = combined_data
+            
+            # Calculate join stats from metadata
+            combined_stats = preprocessing_metadata.get('combined_processing', {})
+            join_stats = {
+                'joined_records': combined_stats.get('records_with_calls', 0),
+                'email_only_records': combined_stats.get('records_without_calls', 0),
+                'calls_only_records': 0,  # Not tracked in preprocessing
+                'join_success_rate': combined_stats.get('success_rate', 0.0),
+                'total_email_records': combined_stats.get('total_combined_records', 0),
+                'total_calls_records': preprocessing_metadata.get('calls_processing', {}).get('total_records', 0)
             }
+            st.session_state.combined_join_stats = join_stats
             
-            email_result = st.session_state.data_processor.process_files(email_files)
+            # Separate data for UI consistency
+            has_calls = combined_data['Total_Calls'] > 0
+            st.session_state.combined_email_only_data = combined_data[~has_calls].copy()
+            st.session_state.combined_calls_only_data = pd.DataFrame()  # Not applicable for LEFT join
+            st.session_state.combined_email_failed = failed_data
             
-            # Handle email result format
-            if len(email_result) == 6:
-                successful_data, failed_data, validation_errors, original_send_count, send_df, send_open_df = email_result
-            elif len(email_result) == 4:
-                successful_data, failed_data, validation_errors, original_send_count = email_result
-                send_df, send_open_df = None, None
-            elif len(email_result) == 3:
-                successful_data, failed_data, validation_errors = email_result
-                original_send_count = len(successful_data) if successful_data is not None else 0
-                send_df, send_open_df = None, None
-            else:
-                successful_data, failed_data = email_result
-                validation_errors = []
-                original_send_count = len(successful_data) if successful_data is not None else 0
-                send_df, send_open_df = None, None
+            # Create metadata
+            metadata = {
+                'email_total': preprocessing_metadata.get('email_processing', {}).get('contacts_join_stats', {}).get('total_send_open_records', 0),
+                'email_successful': preprocessing_metadata.get('email_processing', {}).get('contacts_join_stats', {}).get('successful_contacts_join', 0),
+                'email_failed': preprocessing_metadata.get('email_processing', {}).get('contacts_join_stats', {}).get('failed_contacts_join', 0),
+                'calls_total': preprocessing_metadata.get('calls_processing', {}).get('total_records', 0),
+                'joined_records': join_stats['joined_records'],
+                'email_only_records': join_stats['email_only_records'],
+                'calls_only_records': join_stats['calls_only_records'],
+                'join_success_rate': join_stats['join_success_rate'],
+                'processing_timestamp': preprocessing_metadata.get('processing_date', ''),
+                'data_source': 'pre_processed_files'
+            }
+            st.session_state.combined_metadata = metadata
             
-            # Process calls file
-            with open(demo_files['calls'], 'rb') as calls_file:
-                calls_success, calls_errors, calls_data = st.session_state.calls_processor.process_calls_file(calls_file)
-            
-            # Store results in session state
-            if successful_data is not None and calls_success:
-                # Store email data
-                st.session_state.successful_data = successful_data
-                st.session_state.failed_data = failed_data
-                st.session_state.original_send_count = original_send_count
-                st.session_state.send_df = send_df
-                st.session_state.send_open_df = send_open_df
+            # Reconstruct send_df and send_open_df for KPI calculations (combining successful + failed)
+            # This ensures KPI calculations work properly
+            total_processed = len(email_data) + len(failed_data) if failed_data is not None else len(email_data)
+            st.session_state.original_send_count = total_processed
+            st.session_state.send_df = None  # Not needed for pre-processed data
+            st.session_state.send_open_df = None  # Not needed for pre-processed data
                 
-                # Store calls data
-                st.session_state.calls_data = calls_data
+            # Show success message
+            processing_date = preprocessing_metadata.get('processing_date', 'Unknown')
+            st.success(f"✅ Pre-processed combined data loaded successfully!")
+            st.info(f"📧 **Email**: {len(email_data):,} records | 📞 **Calls**: {len(calls_data):,} records")
+            st.info(f"🔗 **Combined**: {len(combined_data):,} records ({join_stats['joined_records']} with calls, {join_stats['email_only_records']} email-only)")
+            st.caption(f"🕒 Processed on: {processing_date}")
                 
-                # Perform the email-calls join to create combined data
-                joined_data, email_only_data, calls_only_data, join_stats = st.session_state.combined_processor.join_email_calls(
-                    successful_data, calls_data
-                )
-                
-                if joined_data is not None:
-                    # Store joined data in combined session state
-                    st.session_state.combined_joined_data = joined_data
-                    st.session_state.combined_email_only_data = email_only_data
-                    st.session_state.combined_calls_only_data = calls_only_data
-                    st.session_state.combined_join_stats = join_stats
-                    st.session_state.combined_email_failed = failed_data
-                    
-                    # Create metadata
-                    metadata = {
-                        'email_total': len(successful_data) + len(failed_data),
-                        'email_successful': len(successful_data),
-                        'email_failed': len(failed_data),
-                        'calls_total': len(calls_data),
-                        'joined_records': join_stats['joined_records'],
-                        'email_only_records': join_stats['email_only_records'],
-                        'calls_only_records': join_stats['calls_only_records'],
-                        'join_success_rate': join_stats['join_success_rate'],
-                        'processing_timestamp': datetime.now().isoformat(),
-                        'data_source': 'demo_files'
-                    }
-                    st.session_state.combined_metadata = metadata
-                
-                # Show success message
-                st.success(f"✅ Combined demo data loaded successfully!")
-                st.info(f"📧 **Email**: {len(successful_data):,} records | 📞 **Calls**: {len(calls_data):,} records")
-                
-                if joined_data is not None:
-                    st.info(f"🔗 **Join Results**: {join_stats['joined_records']} records with both email and calls data")
-                
-                if validation_errors or calls_errors:
-                    with st.expander("⚠️ Validation Issues", expanded=False):
-                        for error in validation_errors + calls_errors:
-                            st.warning(error)
-                            
-                st.rerun()
-            else:
-                st.error("❌ Failed to process combined demo data")
-                for error in validation_errors + calls_errors:
-                    st.error(error)
+            st.rerun()
                         
     except Exception as e:
-        st.error(f"❌ Error loading combined demo data: {str(e)}")
+        st.error(f"❌ Error loading pre-processed combined data: {str(e)}")
+        st.info("💡 Make sure to run: `python preprocess_data.py` first")
+
+def load_demo_data_multi_sdr():
+    """Load pre-processed demo data from processed_files folder"""
+    try:
+        st.info("🔄 Loading pre-processed demo data...")
+        
+        # Check if processed files exist
+        processed_email_file = 'data/processed_files/processed_email_data.csv'
+        contacts_failed_file = 'data/processed_files/contacts_failed_records.csv'
+        metadata_file = 'data/processed_files/preprocessing_metadata.json'
+        
+        if not os.path.exists(processed_email_file):
+            st.error("❌ Pre-processed email data not found!")
+            st.info("🔧 Please run the preprocessing script first: `python preprocess_data.py`")
+            return
+        
+        # Load processed email data
+        successful_data = pd.read_csv(processed_email_file)
+        
+        # Convert date columns to datetime for proper filtering
+        if 'sent_date' in successful_data.columns:
+            successful_data['sent_date'] = pd.to_datetime(successful_data['sent_date'], errors='coerce')
+        if 'last_opened' in successful_data.columns:
+            successful_data['last_opened'] = pd.to_datetime(successful_data['last_opened'], errors='coerce')
+        
+        # Load failed data if exists
+        failed_data = pd.DataFrame()
+        if os.path.exists(contacts_failed_file):
+            failed_data = pd.read_csv(contacts_failed_file)
+            # Convert date columns to datetime for failed data too
+            if 'sent_date' in failed_data.columns:
+                failed_data['sent_date'] = pd.to_datetime(failed_data['sent_date'], errors='coerce')
+            if 'last_opened' in failed_data.columns:
+                failed_data['last_opened'] = pd.to_datetime(failed_data['last_opened'], errors='coerce')
+        
+        # Load metadata if exists
+        metadata = {}
+        if os.path.exists(metadata_file):
+            import json
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+        
+        # Parse datetime columns
+        if 'sent_date' in successful_data.columns:
+            successful_data['sent_date'] = pd.to_datetime(successful_data['sent_date'])
+        if len(failed_data) > 0 and 'sent_date' in failed_data.columns:
+            failed_data['sent_date'] = pd.to_datetime(failed_data['sent_date'])
+        
+        # Store in session state
+        st.session_state.successful_data = successful_data
+        st.session_state.failed_data = failed_data
+        
+        # Calculate metrics from metadata or data
+        if 'email_processing' in metadata and 'contacts_join_stats' in metadata['email_processing']:
+            contacts_stats = metadata['email_processing']['contacts_join_stats']
+            original_send_count = contacts_stats.get('total_send_open_records', len(successful_data) + len(failed_data))
+            successful_count = contacts_stats.get('successful_contacts_join', len(successful_data))
+            failed_count = contacts_stats.get('failed_contacts_join', len(failed_data))
+        else:
+            # Fallback to actual data counts
+            original_send_count = len(successful_data) + len(failed_data)
+            successful_count = len(successful_data)
+            failed_count = len(failed_data)
+        
+        st.session_state.original_send_count = original_send_count
+        
+        # For KPI calculations, we need to simulate the intermediate datasets
+        # Since we don't have the actual send_df and send_open_df, we'll use the successful_data
+        # The successful_data is essentially the final join result
+        
+        # For send_df: Use successful_data + failed_data (all records that went through send stage)
+        all_records = pd.concat([successful_data, failed_data], ignore_index=True) if len(failed_data) > 0 else successful_data
+        st.session_state.send_df = all_records  # This represents all send records
+        
+        # For send_open_df: Use successful_data + failed_data (all records that went through send-open join)
+        st.session_state.send_open_df = all_records  # This represents send-open joined data
+        
+        # Calculate success rate
+        total_processed = successful_count + failed_count
+        success_rate = (successful_count / total_processed * 100) if total_processed > 0 else 0
+        
+        st.success(f"✅ Pre-processed demo data loaded successfully!")
+        
+        # Show processing summary
+        processing_info = []
+        processing_info.append(f"- Total records processed: {total_processed:,}")
+        processing_info.append(f"- Successful matches: {successful_count:,} ({success_rate:.1f}%)")
+        processing_info.append(f"- Failed matches: {failed_count:,} ({100-success_rate:.1f}%)")
+        
+        # Show SDR information if available
+        if 'email_processing' in metadata and 'send_open_join_stats' in metadata['email_processing']:
+            sdr_stats = metadata['email_processing']['send_open_join_stats']
+            sdr_names = list(sdr_stats.keys())
+            if sdr_names:
+                processing_info.append(f"- SDRs processed: {', '.join(sdr_names)}")
+        
+        # Show processing date if available
+        if 'processing_date' in metadata:
+            processing_date = metadata['processing_date'][:19].replace('T', ' ')  # Format datetime
+            processing_info.append(f"- Processed on: {processing_date}")
+        
+        st.info("📊 **Processing Summary:**\n" + "\n".join(processing_info))
+        
+        st.rerun()
+            
+    except Exception as e:
+        st.error(f"Error loading pre-processed demo data: {str(e)}")
+        st.info("💡 Make sure to run: `python preprocess_data.py` first")
+
+def process_multi_sdr_data(ready_sdrs):
+    """Process multiple SDR files individually then combine"""
+    with st.spinner("🔄 Processing SDR data..."):
+        try:
+            all_send_open_successful = []
+            all_send_open_failed = []
+            processing_log = []
+            
+            # Step 1: Process each SDR individually (Send-Open join only)
+            for idx, sdr_info in enumerate(ready_sdrs):
+                sdr_name = sdr_info['name']
+                processing_log.append(f"Processing SDR {idx + 1}: {sdr_name}...")
+                
+                # Process this SDR's Send-Open join
+                send_open_successful, send_open_failed, errors = st.session_state.data_processor.process_single_sdr(
+                    sdr_info['send_file'],
+                    sdr_info['open_file'], 
+                    sdr_name
+                )
+                
+                if send_open_successful is not None:
+                    all_send_open_successful.append(send_open_successful)
+                    if send_open_failed is not None and len(send_open_failed) > 0:
+                        all_send_open_failed.append(send_open_failed)
+                    
+                    processing_log.append(f"✅ {sdr_name}: {len(send_open_successful)} Send-Open joined, {len(send_open_failed) if send_open_failed is not None else 0} failed")
+                else:
+                    processing_log.append(f"❌ {sdr_name}: Failed - {', '.join(errors)}")
+            
+            # Step 2: Combine all SDRs' Send-Open data
+            if all_send_open_successful:
+                combined_send_open = pd.concat(all_send_open_successful, ignore_index=True)
+                combined_send_open_failed = pd.concat(all_send_open_failed, ignore_index=True) if all_send_open_failed else pd.DataFrame()
+                
+                processing_log.append(f"📊 Combined {len(all_send_open_successful)} SDRs: {len(combined_send_open)} total Send-Open records")
+                
+                # Step 3: Join combined data with contacts
+                final_successful, contacts_failed, errors = st.session_state.data_processor.process_multi_sdr_combined(
+                    combined_send_open
+                )
+                
+                if final_successful is not None:
+                    # Combine all failed records
+                    all_failed_list = []
+                    if len(combined_send_open_failed) > 0:
+                        all_failed_list.append(combined_send_open_failed)
+                    if contacts_failed is not None and len(contacts_failed) > 0:
+                        all_failed_list.append(contacts_failed)
+                    
+                    all_failed = pd.concat(all_failed_list, ignore_index=True) if all_failed_list else pd.DataFrame()
+                    
+                    # Store in session state
+                    st.session_state.successful_data = final_successful
+                    st.session_state.failed_data = all_failed
+                    st.session_state.original_send_count = len(combined_send_open) + len(combined_send_open_failed)
+                    st.session_state.multi_sdr_processing_log = processing_log
+                    
+                    processing_log.append(f"✅ Final: {len(final_successful)} records with contacts, {len(all_failed)} total failed")
+                    
+                    # Show summary
+                    st.success(f"✅ Successfully processed {len(all_send_open_successful)} SDRs!")
+                    
+                    # Show detailed log
+                    with st.expander("📋 Processing Details", expanded=True):
+                        for log_entry in processing_log:
+                            if "✅" in log_entry:
+                                st.success(log_entry)
+                            elif "❌" in log_entry:
+                                st.error(log_entry)
+                            else:
+                                st.info(log_entry)
+                    
+                    # Summary metrics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("SDRs Processed", len(all_send_open_successful))
+                    with col2:
+                        st.metric("Total Records", len(final_successful) + len(all_failed))
+                    with col3:
+                        st.metric("Successful", len(final_successful))
+                    with col4:
+                        st.metric("Failed", len(all_failed))
+                    
+                    st.rerun()
+                else:
+                    st.error(f"Failed to join with contacts: {', '.join(errors)}")
+            else:
+                st.error("No SDR Send-Open joins were successful")
+                
+        except Exception as e:
+            st.error(f"Error processing SDR data: {str(e)}")
+
+def show_multi_sdr_welcome():
+    """Show welcome message for multi-SDR mode"""
+    st.info("👆 Add SDRs and upload their Send/Open files to get started")
+    
+    # Show instructions
+    with st.expander("📋 How to use Multi-SDR Upload"):
+        st.markdown("""
+        ### Steps to process multiple SDR data:
+        
+        1. **Add SDRs**: Click "➕ Add SDR" to create more SDR cards (up to 10)
+        2. **Enter SDR Name**: Type the SDR's name in each card
+        3. **Upload Files**: Upload Send and Open CSV files for each SDR
+        4. **Process**: Click "🚀 Process All SDRs" when ready
+        
+        ### Benefits of Multi-SDR Processing:
+        - **Individual Joining**: Each SDR's Send-Open data is joined separately
+        - **No Collisions**: Prevents mixing of data between SDRs
+        - **SDR Attribution**: Each record is tagged with the SDR's name
+        - **Combined Analytics**: View aggregated metrics across all SDRs
+        
+        ### File Requirements:
+        - Each SDR needs both Send and Open files
+        - Files should follow the standard format
+        - Contacts database is shared across all SDRs
+        """)
 
 def show_welcome_message():
     st.info("👆 Upload your CSV files using the sidebar to get started")
@@ -821,7 +1133,16 @@ def show_successful_dashboard(data, original_send_count):
     
     # Dashboard filters
     st.subheader("📊 Dashboard Filters")
-    col1, col2, col3, col4 = st.columns([3, 3, 3, 3])
+    
+    # Check if SDR_Name column exists (multi-SDR data)
+    has_sdr_data = 'SDR_Name' in data.columns
+    
+    if has_sdr_data:
+        # 5 columns for SDR filter
+        col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+    else:
+        # 4 columns without SDR filter
+        col1, col2, col3, col4 = st.columns([3, 3, 3, 3])
     
     with col1:
         # Date range selector - check if we have a clicked date range from chart
@@ -836,43 +1157,66 @@ def show_successful_dashboard(data, original_send_count):
             default_value = (min_date, max_date)
         
         date_range = st.date_input(
-            "Sent Date Range",
+            "📅 Date Range",
             value=default_value,
             min_value=min_date,
             max_value=max_date,
             key="date_range"
         )
     
-    # with col2:
-    #     # Account Owner filter - REMOVED
-    #     account_owners = ['All'] + sorted(data['Account Owner'].dropna().unique().tolist())
-    #     selected_account_owner = st.selectbox(
-    #         "Account Owner",
-    #         account_owners,
-    #         key="account_owner_filter"
-    #     )
-    
-    with col2:
-        analysis_type = st.selectbox(
-            "Analysis Type",
-            ["Week-on-Week", "Month-on-Month"],
-            key="analysis_type"
-        )
-    
-    with col3:
-        # Metric selector
-        metric = st.selectbox(
-            "Primary Metric",
-            ["Views", "Clicks", "total_sends"],
-            key="metric"
-        )
-    
-    with col4:
-        # Reset filters button
-        if st.button("Reset Filters", type="secondary"):
-            # Clear clicked date range from session state safely
-            st.session_state.pop('clicked_date_range', None)
-            st.rerun()
+    if has_sdr_data:
+        with col2:
+            # SDR filter
+            sdr_names = ['All SDRs'] + sorted(data['SDR_Name'].dropna().unique().tolist())
+            selected_sdr = st.selectbox(
+                "👤 SDR",
+                sdr_names,
+                key="sdr_filter"
+            )
+        
+        with col3:
+            analysis_type = st.selectbox(
+                "📈 Analysis",
+                ["Week-on-Week", "Month-on-Month"],
+                key="analysis_type"
+            )
+        
+        with col4:
+            # Metric selector
+            metric = st.selectbox(
+                "📊 Metric",
+                ["Views", "Clicks", "total_sends"],
+                key="metric"
+            )
+        
+        with col5:
+            # Reset filters button
+            if st.button("🔄 Reset", type="secondary"):
+                # Clear clicked date range from session state safely
+                st.session_state.pop('clicked_date_range', None)
+                st.rerun()
+    else:
+        with col2:
+            analysis_type = st.selectbox(
+                "Analysis Type",
+                ["Week-on-Week", "Month-on-Month"],
+                key="analysis_type"
+            )
+        
+        with col3:
+            # Metric selector
+            metric = st.selectbox(
+                "Primary Metric",
+                ["Views", "Clicks", "total_sends"],
+                key="metric"
+            )
+        
+        with col4:
+            # Reset filters button
+            if st.button("Reset Filters", type="secondary"):
+                # Clear clicked date range from session state safely
+                st.session_state.pop('clicked_date_range', None)
+                st.rerun()
     
     # Apply filters to all datasets
     filtered_data = data.copy()
@@ -901,15 +1245,34 @@ def show_successful_dashboard(data, original_send_count):
                 (filtered_send_open_df['sent_date'].dt.date <= date_range[1])
             ]
     
-    # Filter by Account Owner - REMOVED
-    # if selected_account_owner != 'All':
-    #     filtered_data = filtered_data[filtered_data['Account Owner'] == selected_account_owner]
+    # Filter by SDR if applicable  
+    if has_sdr_data and 'sdr_filter' in st.session_state:
+        selected_sdr = st.session_state.sdr_filter
+        if selected_sdr != 'All SDRs':
+            # Filter final dataset
+            filtered_data = filtered_data[filtered_data['SDR_Name'] == selected_sdr]
+            
+            # Filter Send dataset
+            if filtered_send_df is not None and 'SDR_Name' in filtered_send_df.columns:
+                filtered_send_df = filtered_send_df[filtered_send_df['SDR_Name'] == selected_sdr]
+            
+            # Filter Send-Open dataset
+            if filtered_send_open_df is not None and 'SDR_Name' in filtered_send_open_df.columns:
+                filtered_send_open_df = filtered_send_open_df[filtered_send_open_df['SDR_Name'] == selected_sdr]
     
     # Show filter summary with chart interaction info
-    filter_info = f"📈 Showing {len(filtered_data):,} records (filtered from {len(data):,} total records)"
+    filter_info = f"📈 Showing {len(filtered_data):,} records (filtered from {len(data):,} total)"
+    
+    # Add SDR filter info if applicable
+    if has_sdr_data and 'sdr_filter' in st.session_state:
+        selected_sdr = st.session_state.sdr_filter
+        if selected_sdr != 'All SDRs':
+            filter_info += f" | 👤 SDR: {selected_sdr}"
+    
     if 'clicked_date_range' in st.session_state:
         clicked_start, clicked_end = st.session_state.clicked_date_range
-        filter_info += f" | 📊 Chart filter active: {clicked_start} to {clicked_end}"
+        filter_info += f" | 📊 Chart filter: {clicked_start} to {clicked_end}"
+    
     st.info(filter_info)
     
     # Create dashboard sections with stage-specific datasets
@@ -1696,22 +2059,22 @@ def show_combined_dashboard():
     
     # Sidebar for demo/upload choice and data status
     with st.sidebar:
-        st.header("🎛️ Data Source")
+        st.header("📊 Combined Data")
         
-        # Demo vs using data from other tabs
+        # Pre-processed vs using data from other tabs
         data_source = st.radio(
             "Choose data source:",
-            ["📂 Use Demo Files", "🔄 Use Data from Other Tabs"],
+            ["📂 Use Pre-processed Data", "🔄 Use Data from Other Tabs"],
             index=0,  # Default to demo files
             key="combined_data_source"
         )
         
-        if data_source == "📂 Use Demo Files":
-            st.success("✅ Using pre-loaded demo files")
-            st.info("Demo includes Send, Open, Calls, and Contacts data")
+        if data_source == "📂 Use Pre-processed Data":
+            st.success("✅ Using pre-processed data files")
+            st.info("Includes pre-processed Email and Calls data")
             
-            # Demo file processing button
-            if st.button("Load Combined Data", type="primary", key="load_demo_combined"):
+            # Pre-processed data loading button
+            if st.button("Load Pre-processed Data", type="primary", key="load_demo_combined"):
                 load_demo_data_combined()
                 
         else:  # Use data from other tabs
@@ -1859,25 +2222,124 @@ def show_combined_analytics():
     
     st.markdown("---")
     
+    # Add filters for combined data
+    st.subheader("🔍 Filters")
+    
+    # Check if SDR data is available
+    has_sdr_data = 'SDR_Name' in joined_data.columns and joined_data['SDR_Name'].nunique() > 1
+    
+    if has_sdr_data:
+        # 3 columns with SDR filter
+        col1, col2, col3 = st.columns([3, 3, 4])
+    else:
+        # 2 columns without SDR filter
+        col1, col2 = st.columns([4, 6])
+    
+    with col1:
+        # Date range selector
+        min_date = joined_data['sent_date'].min().date()
+        max_date = joined_data['sent_date'].max().date()
+        
+        date_range = st.date_input(
+            "📅 Sent Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date,
+            key="combined_date_range"
+        )
+    
+    with col2:
+        if has_sdr_data:
+            # SDR filter
+            sdr_names = ['All'] + sorted(joined_data['SDR_Name'].unique().tolist())
+            selected_sdr = st.selectbox(
+                "👤 SDR Name",
+                sdr_names,
+                index=0,
+                key="combined_sdr_filter"
+            )
+        else:
+            selected_sdr = 'All'
+    
+    if has_sdr_data:
+        with col3:
+            # Reset filters button
+            if st.button("🔄 Reset Filters", key="combined_reset_filters"):
+                st.session_state.combined_date_range = (min_date, max_date)
+                st.session_state.combined_sdr_filter = 'All'
+                st.rerun()
+    else:
+        # Reset filters button (2 column layout)
+        if st.button("🔄 Reset Filters", key="combined_reset_filters"):
+            st.session_state.combined_date_range = (min_date, max_date)
+            st.rerun()
+    
+    # Apply filters
+    filtered_data = joined_data.copy()
+    
+    # Apply date range filter
+    if len(date_range) == 2:
+        start_date = pd.Timestamp(date_range[0])
+        end_date = pd.Timestamp(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        filtered_data = filtered_data[
+            (filtered_data['sent_date'] >= start_date) & 
+            (filtered_data['sent_date'] <= end_date)
+        ]
+    
+    # Apply SDR filter
+    if has_sdr_data and selected_sdr != 'All':
+        filtered_data = filtered_data[filtered_data['SDR_Name'] == selected_sdr]
+    
+    # Show filter summary and KPIs for filtered data
+    if len(filtered_data) != len(joined_data):
+        st.info(f"📊 Showing **{len(filtered_data):,} records** (filtered from {len(joined_data):,} total)")
+    
+    # Display KPIs for filtered data
+    if len(filtered_data) > 0:
+        st.subheader("📊 Filtered Data KPIs")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            total_emails = len(filtered_data)
+            st.metric("Total Emails", f"{total_emails:,}")
+        
+        with col2:
+            total_views = filtered_data['Views'].sum() if 'Views' in filtered_data.columns else 0
+            st.metric("Total Views", f"{total_views:,}")
+        
+        with col3:
+            total_clicks = filtered_data['Clicks'].sum() if 'Clicks' in filtered_data.columns else 0
+            st.metric("Total Clicks", f"{total_clicks:,}")
+        
+        with col4:
+            records_with_calls = len(filtered_data[filtered_data['Total_Calls'] > 0]) if 'Total_Calls' in filtered_data.columns else 0
+            st.metric("Records with Calls", f"{records_with_calls:,}")
+        
+        with col5:
+            total_calls = filtered_data['Total_Calls'].sum() if 'Total_Calls' in filtered_data.columns else 0
+            st.metric("Total Calls Made", f"{total_calls:,}")
+    
+    st.markdown("---")
+    
     # Main data display - similar to Email Analytics tab
     st.subheader("📋 Combined Email & Calls Records")
     
-    if len(joined_data) > 0:
+    if len(filtered_data) > 0:
         # Show summary of what columns were added from calls
-        calls_columns_added = [col for col in ['Assigned', 'Call Disposition', 'Call Date', 'Call Duration (seconds)', 'Full Comments'] if col in joined_data.columns]
+        calls_columns_added = [col for col in ['Total_Calls', 'Connected_Calls', 'Total_Call_Duration', 'Latest_Call_Date'] if col in filtered_data.columns]
         if calls_columns_added:
-            st.info(f"📞 **Calls data joined**: {', '.join(calls_columns_added)}")
+            st.info(f"📞 **Calls data added**: {', '.join(calls_columns_added)}")
         
-        # Display the joined data table
-        st.dataframe(joined_data, use_container_width=True)
-        st.caption(f"Showing all {len(joined_data)} combined email-calls records")
+        # Display the filtered data table
+        st.dataframe(filtered_data, use_container_width=True)
+        st.caption(f"Showing {len(filtered_data)} combined email-calls records")
         
-        # Download option for joined data
-        csv_data = joined_data.to_csv(index=False)
+        # Download option for filtered data
+        csv_data = filtered_data.to_csv(index=False)
         st.download_button(
-            label="📥 Download Combined Data",
+            label="📥 Download Filtered Data",
             data=csv_data,
-            file_name=f"combined_email_calls_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            file_name=f"combined_email_calls_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
             key="download_combined"
         )
@@ -1887,8 +2349,8 @@ def show_combined_analytics():
     
     st.markdown("---")
     
-    # High Engagement Accounts Analysis - Enhanced with Call Data
-    show_combined_engagement_table(joined_data)
+    # High Engagement Accounts Analysis - Enhanced with Call Data (using filtered data)
+    show_combined_engagement_table(filtered_data)
     
     # Show email-only and calls-only data if they exist
     if 'combined_email_only_data' in st.session_state and len(st.session_state.combined_email_only_data) > 0:

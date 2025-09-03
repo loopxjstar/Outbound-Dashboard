@@ -1,0 +1,40 @@
+{
+  "processing_date": "2025-09-03T18:48:37.241804",
+  "email_processing": {
+    "send_open_join_stats": {
+      "harshit.gupta": {
+        "total_send": 2619,
+        "joined": 2619,
+        "failed": 0
+      },
+      "himanshu.singh": {
+        "total_send": 2479,
+        "joined": 2479,
+        "failed": 0
+      }
+    },
+    "contacts_join_stats": {
+      "total_send_open_records": 5098,
+      "successful_contacts_join": 4417,
+      "failed_contacts_join": 681
+    }
+  },
+  "calls_processing": {
+    "total_records": 4545,
+    "successful": true,
+    "errors": []
+  },
+  "combined_processing": {
+    "total_combined_records": 4417,
+    "records_with_calls": 2532,
+    "records_without_calls": 1885,
+    "emails_with_call_data": 0,
+    "success_rate": 57.323975549015174
+  },
+  "output_files": {
+    "email_data": "processed_email_data.csv",
+    "contacts_failed": "contacts_failed_records.csv",
+    "calls_data": "processed_calls_data.csv",
+    "combined_data": "processed_combined_data.csv"
+  }
+}
